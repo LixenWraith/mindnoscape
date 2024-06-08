@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	fmt.Println(time.Now())0
+	fmt.Println(time.Now())
 }
