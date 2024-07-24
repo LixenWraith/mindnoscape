@@ -1,11 +1,13 @@
 package main
 
 import (
-	"bufio"
+//	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"github.com/chzyer/readline"
 	"io/ioutil"
-	"os"
+//	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -307,13 +309,32 @@ func parseExtraFields(args []string) map[string]string {
 
 func main() {
 	mm := NewMindMap()
-	scanner := bufio.NewScanner(os.Stdin)
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "> ",
+		HistoryFile:     "/tmp/mindmap_history.txt",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer rl.Close()
 
 	for {
-		fmt.Print("> ")
-		scanner.Scan()
-		input := scanner.Text()
-		args := parseArgs(input)
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			if len(line) == 0 {
+				break
+			} else {
+				continue
+			}
+		} else if err == io.EOF {
+			break
+		}
+
+		line = strings.TrimSpace(line)
+		args := parseArgs(line)
 
 		if len(args) == 0 {
 			continue
