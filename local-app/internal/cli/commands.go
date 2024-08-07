@@ -215,6 +215,12 @@ func (c *CLI) handleLoad(args []string) error {
 		return err
 	}
 
+	// Reload the mind map from storage
+	err = c.MindMap.LoadNodes()
+	if err != nil {
+		return fmt.Errorf("failed to reload mind map after load: %v", err)
+	}
+
 	fmt.Printf("Mind map loaded from %s\n", filename)
 	return nil
 }

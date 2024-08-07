@@ -175,13 +175,13 @@ Description: Displays the mindmap or a specific subtree.
 - [--index]: Optional flag to use index instead of logical index.
 Example: show 1.2`,
 
-	"save": `Syntax: save [json/xml] [filename]
+	"save": `Syntax: save [filename] [json/xml]
 Description: Saves the current mindmap to a file in JSON or XML format.
+- [filename]: Optional filename to save to. If omitted, saves to "mindmap.json".
 - [json/xml]: Optional format to save in. Default is JSON if not specified.
-- [filename]: Optional filename to save to. If omitted, saves to "mindmap.json" or "mindmap.xml".
-Example: save xml mymap.xml`,
+Example: save mymap.xml xml`,
 
-	"load": `Syntax: load [json/xml] [filename]
+	"load": `Syntax: load [filename] [json/xml]
 Description: Loads a mindmap from a JSON or XML file.
 - [json/xml]: Optional format to load from. Default is JSON if not specified.
 - [filename]: Optional filename to load from. If omitted, loads from "mindmap.json" or "mindmap.xml".

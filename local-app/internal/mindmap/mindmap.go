@@ -19,8 +19,6 @@ type MindMap struct {
 }
 
 func NewMindMap(store storage.Store) (*MindMap, error) {
-	fmt.Println("DEBUG: NewMindMap called")
-
 	mm := &MindMap{
 		Nodes:    make(map[int]*models.Node),
 		Store:    store,
@@ -31,7 +29,7 @@ func NewMindMap(store storage.Store) (*MindMap, error) {
 	root, err := store.GetNode(0)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			fmt.Println("DEBUG: Root node not found, creating new one")
+			fmt.Println("Root node not found, creating new one")
 			// Create a new root node
 			root = models.NewNode(0, "Root")
 			root.LogicalIndex = "0"
@@ -42,37 +40,34 @@ func NewMindMap(store storage.Store) (*MindMap, error) {
 			return nil, fmt.Errorf("failed to get root node: %v", err)
 		}
 	} else {
-		fmt.Println("DEBUG: Loaded existing root node")
+		fmt.Println("Loaded existing root node")
 	}
 
 	mm.Root = root
 	mm.Nodes[root.Index] = root
 
-	fmt.Printf("DEBUG: Root node: %+v\n", root)
-
 	// Load all nodes from storage
-	if err := mm.loadNodes(); err != nil {
+	if err := mm.LoadNodes(); err != nil {
 		return nil, fmt.Errorf("failed to load nodes: %v", err)
 	}
 
 	mm.assignLogicalIndex(mm.Root, "")
 
-	fmt.Printf("DEBUG: MindMap initialized with %d nodes\n", len(mm.Nodes))
+	fmt.Printf("MindMap initialized with %d nodes\n", len(mm.Nodes))
 
 	return mm, nil
 }
 
-func (mm *MindMap) loadNodes() error {
-	fmt.Println("DEBUG: loadNodes called")
-
+func (mm *MindMap) LoadNodes() error {
 	nodes, err := mm.Store.GetAllNodes()
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("DEBUG: Retrieved %d nodes from storage\n", len(nodes))
+	fmt.Printf("Retrieved %d nodes from storage\n", len(nodes))
 
 	mm.Nodes = make(map[int]*models.Node)
+	mm.MaxIndex = 0
 	var rootNode *models.Node
 
 	// First pass: create all nodes
@@ -82,7 +77,7 @@ func (mm *MindMap) loadNodes() error {
 			mm.MaxIndex = node.Index
 		}
 		node.Children = []*models.Node{} // Initialize Children slice
-		fmt.Printf("DEBUG: Loaded node: %+v\n", node)
+		fmt.Printf("Loaded node: Content=%s, LogicalIndex=%s\n", node.Content, node.LogicalIndex)
 
 		// Identify the root node (it should have index 0)
 		if node.Index == 0 {
@@ -97,7 +92,7 @@ func (mm *MindMap) loadNodes() error {
 			if parent != nil {
 				parent.Children = append(parent.Children, node)
 			} else {
-				fmt.Printf("DEBUG: Parent node %d not found for node %d\n", node.ParentID, node.Index)
+				fmt.Printf("Warning: Parent node %d not found for node %d\n", node.ParentID, node.Index)
 			}
 		}
 	}
@@ -114,15 +109,11 @@ func (mm *MindMap) loadNodes() error {
 		return fmt.Errorf("root node not found")
 	}
 
-	fmt.Printf("DEBUG: Tree structure built. Root has %d children\n", len(mm.Root.Children))
-	mm.debugPrintStructure(mm.Root, 0)
-
+	fmt.Printf("Mind map structure built. Root has %d children\n", len(mm.Root.Children))
 	return nil
 }
 
 func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
-	fmt.Printf("DEBUG: assignLogicalIndex called for node: %s, prefix: %s\n", node.Content, prefix)
-
 	if node == mm.Root {
 		node.LogicalIndex = "0"
 		prefix = ""
@@ -130,39 +121,33 @@ func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
 
 	for i, child := range node.Children {
 		child.LogicalIndex = fmt.Sprintf("%s%d", prefix, i+1)
-		fmt.Printf("DEBUG: Assigned LogicalIndex %s to node %s\n", child.LogicalIndex, child.Content)
+		fmt.Printf("Assigned LogicalIndex %s to node %s\n", child.LogicalIndex, child.Content)
 		mm.assignLogicalIndex(child, child.LogicalIndex+".")
 	}
 }
 
 func (mm *MindMap) findNodeByLogicalIndex(logicalIndex string) *models.Node {
-	fmt.Printf("DEBUG: findNodeByLogicalIndex called with logicalIndex: %s\n", logicalIndex)
-
 	if logicalIndex == "0" {
-		fmt.Printf("DEBUG: Returning root node\n")
 		return mm.Root
 	}
 
 	parts := strings.Split(logicalIndex, ".")
 	currentNode := mm.Root
 
-	for i, part := range parts {
+	for _, part := range parts {
 		index, err := strconv.Atoi(part)
 		if err != nil || index < 1 || index > len(currentNode.Children) {
-			fmt.Printf("DEBUG: Invalid index at part %d: %s\n", i, part)
 			return nil
 		}
 		currentNode = currentNode.Children[index-1]
-		fmt.Printf("DEBUG: Moving to child node: %+v\n", currentNode)
 	}
 
-	fmt.Printf("DEBUG: Returning node: %+v\n", currentNode)
 	return currentNode
 }
 
 func (mm *MindMap) Show(logicalIndex string, showIndex bool) error {
 	// Reload nodes from storage to ensure we have the latest data
-	if err := mm.loadNodes(); err != nil {
+	if err := mm.LoadNodes(); err != nil {
 		return fmt.Errorf("failed to reload nodes: %v", err)
 	}
 
@@ -170,7 +155,6 @@ func (mm *MindMap) Show(logicalIndex string, showIndex bool) error {
 	mm.visualize(mm.Root, "", true, showIndex)
 
 	// Debug output
-	fmt.Println("\nDebug: Full mind map structure:")
 	mm.debugPrintStructure(mm.Root, 0)
 
 	return nil
@@ -178,7 +162,6 @@ func (mm *MindMap) Show(logicalIndex string, showIndex bool) error {
 
 func (mm *MindMap) visualize(node *models.Node, prefix string, isLast bool, showIndex bool) {
 	if node == nil {
-		fmt.Println("DEBUG: Attempting to visualize nil node")
 		return
 	}
 
@@ -219,6 +202,7 @@ func (mm *MindMap) visualize(node *models.Node, prefix string, isLast bool, show
 }
 
 func (mm *MindMap) debugPrintStructure(node *models.Node, depth int) {
+	fmt.Println("\nDebug: Full mind map structure:")
 	indent := strings.Repeat("  ", depth)
 	fmt.Printf("%s- [%d] %s (LogicalIndex: %s, ParentID: %d)\n", indent, node.Index, node.Content, node.LogicalIndex, node.ParentID)
 	for _, child := range node.Children {

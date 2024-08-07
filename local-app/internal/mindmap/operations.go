@@ -2,16 +2,12 @@ package mindmap
 
 import (
 	"fmt"
+	"mindnoscape/local-app/internal/models"
 	"sort"
 	"strconv"
-	"strings"
-
-	"mindnoscape/local-app/internal/models"
 )
 
 func (mm *MindMap) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
-	fmt.Printf("DEBUG: AddNode called with parentIdentifier: %s, content: %s, useIndex: %v\n", parentIdentifier, content, useIndex)
-
 	var parentNode *models.Node
 	if useIndex {
 		index, err := strconv.Atoi(parentIdentifier)
@@ -19,27 +15,19 @@ func (mm *MindMap) AddNode(parentIdentifier string, content string, extra map[st
 			return fmt.Errorf("invalid index: %v", err)
 		}
 		parentNode = mm.Nodes[index]
-		fmt.Printf("DEBUG: Using index. Parent node found: %v\n", parentNode != nil)
 	} else {
 		if parentIdentifier == "0" {
 			parentNode = mm.Root
-			fmt.Printf("DEBUG: Using root as parent node\n")
 		} else {
 			parentNode = mm.findNodeByLogicalIndex(parentIdentifier)
-			fmt.Printf("DEBUG: Using logical index. Parent node found: %v\n", parentNode != nil)
 		}
 	}
 
 	if parentNode == nil {
-		fmt.Printf("DEBUG: Parent node is nil. Nodes in mm.Nodes: %d\n", len(mm.Nodes))
-		for k, v := range mm.Nodes {
-			fmt.Printf("DEBUG: Node[%d] = %+v\n", k, v)
-		}
 		return fmt.Errorf("parent node not found")
 	}
 
 	newIndex := mm.getNextIndex()
-	fmt.Printf("DEBUG: New node index: %d\n", newIndex)
 
 	newNode := models.NewNode(newIndex, content)
 	newNode.Extra = extra
@@ -59,6 +47,7 @@ func (mm *MindMap) AddNode(parentIdentifier string, content string, extra map[st
 		if err := mm.Store.UpdateNode(mm.Root.Index, mm.Root.Content, mm.Root.Extra, mm.Root.LogicalIndex); err != nil {
 			return fmt.Errorf("failed to update root node in storage: %v", err)
 		}
+		fmt.Println("Updated root node logical index")
 	}
 
 	// Add to storage
@@ -70,7 +59,7 @@ func (mm *MindMap) AddNode(parentIdentifier string, content string, extra map[st
 	parentNode.Children = append(parentNode.Children, newNode)
 	mm.Nodes[newIndex] = newNode
 
-	fmt.Printf("DEBUG: Node added successfully. New node: %+v\n", newNode)
+	fmt.Printf("Added new node: Content='%s', LogicalIndex='%s', ParentIndex=%d\n", newNode.Content, newNode.LogicalIndex, parentNode.Index)
 
 	return nil
 }
@@ -290,8 +279,6 @@ func (mm *MindMap) MoveNode(sourceIdentifier, targetIdentifier string, useIndex 
 }
 
 func (mm *MindMap) Sort(identifier string, field string, reverse bool, useIndex bool) error {
-	fmt.Printf("DEBUG: Sort called with identifier: %s, field: %s, reverse: %v, useIndex: %v\n", identifier, field, reverse, useIndex)
-
 	var node *models.Node
 	if identifier == "" {
 		node = mm.Root
@@ -309,8 +296,7 @@ func (mm *MindMap) Sort(identifier string, field string, reverse bool, useIndex 
 		return fmt.Errorf("node not found")
 	}
 
-	fmt.Printf("DEBUG: Sorting children of node: %s (Index: %d)\n", node.Content, node.Index)
-	fmt.Printf("DEBUG: Children before sort: %v\n", nodesToString(node.Children))
+	fmt.Printf("Sorting children of node: %s (LogicalIndex: %s)\n", node.Content, node.LogicalIndex)
 
 	mm.sortNodeChildrenRecursively(node, field, reverse)
 	mm.assignLogicalIndexForSubtree(node)
@@ -321,18 +307,10 @@ func (mm *MindMap) Sort(identifier string, field string, reverse bool, useIndex 
 		return fmt.Errorf("failed to update node order in database: %v", err)
 	}
 
-	// Reload nodes to ensure in-memory structure is in sync with the database
-	err = mm.loadNodes()
-	if err != nil {
-		return fmt.Errorf("failed to reload nodes after sorting: %v", err)
-	}
-
 	return nil
 }
 
 func (mm *MindMap) assignLogicalIndexForSubtree(node *models.Node) {
-	fmt.Printf("DEBUG: assignLogicalIndexForSubtree called for node: %s\n", node.Content)
-
 	var assign func(*models.Node, string)
 	assign = func(n *models.Node, prefix string) {
 		for i, child := range n.Children {
@@ -341,7 +319,6 @@ func (mm *MindMap) assignLogicalIndexForSubtree(node *models.Node) {
 			} else {
 				child.LogicalIndex = fmt.Sprintf("%s.%d", prefix, i+1)
 			}
-			fmt.Printf("DEBUG: Assigned LogicalIndex %s to node %s\n", child.LogicalIndex, child.Content)
 			assign(child, child.LogicalIndex)
 		}
 	}
@@ -353,17 +330,7 @@ func (mm *MindMap) assignLogicalIndexForSubtree(node *models.Node) {
 	}
 }
 
-func nodesToString(nodes []*models.Node) string {
-	var s []string
-	for _, n := range nodes {
-		s = append(s, fmt.Sprintf("{Content: %s, LogicalIndex: %s}", n.Content, n.LogicalIndex))
-	}
-	return strings.Join(s, ", ")
-}
-
 func (mm *MindMap) sortNodeChildrenRecursively(node *models.Node, field string, reverse bool) {
-	fmt.Printf("DEBUG: sortNodeChildrenRecursively called for node: %s, field: %s, reverse: %v\n", node.Content, field, reverse)
-
 	sort.Slice(node.Children, func(i, j int) bool {
 		var vi, vj string
 		if field == "" {
@@ -395,8 +362,6 @@ func (mm *MindMap) sortNodeChildrenRecursively(node *models.Node, field string, 
 		return vi < vj
 	})
 
-	fmt.Printf("DEBUG: Children after sorting: %v\n", nodesToString(node.Children))
-
 	// Recursively sort children of children
 	for _, child := range node.Children {
 		mm.sortNodeChildrenRecursively(child, field, reverse)
@@ -404,13 +369,9 @@ func (mm *MindMap) sortNodeChildrenRecursively(node *models.Node, field string, 
 }
 
 func (mm *MindMap) updateNodeOrderInDB(node *models.Node) error {
-	fmt.Printf("DEBUG: updateNodeOrderInDB called for node: %s\n", node.Content)
-
 	var updateNode func(*models.Node) error
 	updateNode = func(n *models.Node) error {
 		for _, child := range n.Children {
-			fmt.Printf("DEBUG: Updating order for child %s (Index: %d), LogicalIndex: %s\n", child.Content, child.Index, child.LogicalIndex)
-
 			err := mm.Store.UpdateNodeOrder(child.Index, child.LogicalIndex)
 			if err != nil {
 				return err

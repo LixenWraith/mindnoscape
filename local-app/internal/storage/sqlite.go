@@ -206,6 +206,12 @@ func (s *SQLiteStore) ClearAllNodes() error {
 		return err
 	}
 
+	// Reset the auto-increment counter
+	_, err = tx.Exec("DELETE FROM sqlite_sequence WHERE name='nodes'")
+	if err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }
 
