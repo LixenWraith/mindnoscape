@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"mindnoscape/local-app/internal/storage"
@@ -10,23 +9,24 @@ import (
 
 func (c *CLI) handleAdd(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: add <parent> <content> [<extra field label>:<extra field value>]...")
+		return fmt.Errorf("usage: add <parent> <content> [<extra field label>:<extra field value>]... [--index]")
 	}
 
 	parentIdentifier := args[0]
 	content := args[1]
 	extra := make(map[string]string)
-
-	for _, arg := range args[2:] {
-		parts := strings.SplitN(arg, ":", 2)
-		if len(parts) == 2 {
-			extra[parts[0]] = parts[1]
-		}
-	}
-
 	useIndex := false
-	if _, err := strconv.Atoi(parentIdentifier); err == nil {
-		useIndex = true
+
+	// Process extra fields and check for --index flag
+	for _, arg := range args[2:] {
+		if arg == "--index" {
+			useIndex = true
+		} else {
+			parts := strings.SplitN(arg, ":", 2)
+			if len(parts) == 2 {
+				extra[parts[0]] = parts[1]
+			}
+		}
 	}
 
 	err := c.MindMap.AddNode(parentIdentifier, content, extra, useIndex)
@@ -39,13 +39,15 @@ func (c *CLI) handleAdd(args []string) error {
 }
 
 func (c *CLI) handleDelete(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: del <node>")
+	if len(args) < 1 {
+		return fmt.Errorf("usage: del <node> [--index]")
 	}
 
 	identifier := args[0]
 	useIndex := false
-	if _, err := strconv.Atoi(identifier); err == nil {
+
+	// Check for --index flag
+	if len(args) > 1 && args[1] == "--index" {
 		useIndex = true
 	}
 
@@ -58,25 +60,40 @@ func (c *CLI) handleDelete(args []string) error {
 	return nil
 }
 
+func (c *CLI) handleClear(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: clear")
+	}
+
+	err := c.MindMap.Clear()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Mind map cleared successfully")
+	return nil
+}
+
 func (c *CLI) handleModify(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: mod <node> <content> [<extra field label>:<extra field value>]...")
+		return fmt.Errorf("usage: mod <node> <content> [<extra field label>:<extra field value>]... [--index]")
 	}
 
 	identifier := args[0]
 	content := args[1]
 	extra := make(map[string]string)
-
-	for _, arg := range args[2:] {
-		parts := strings.SplitN(arg, ":", 2)
-		if len(parts) == 2 {
-			extra[parts[0]] = parts[1]
-		}
-	}
-
 	useIndex := false
-	if _, err := strconv.Atoi(identifier); err == nil {
-		useIndex = true
+
+	// Process extra fields and check for --index flag
+	for i := 2; i < len(args); i++ {
+		if args[i] == "--index" {
+			useIndex = true
+		} else {
+			parts := strings.SplitN(args[i], ":", 2)
+			if len(parts) == 2 {
+				extra[parts[0]] = parts[1]
+			}
+		}
 	}
 
 	err := c.MindMap.ModifyNode(identifier, content, extra, useIndex)
@@ -89,20 +106,17 @@ func (c *CLI) handleModify(args []string) error {
 }
 
 func (c *CLI) handleMove(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("usage: move <source> <target>")
+	if len(args) < 2 {
+		return fmt.Errorf("usage: move <source> <target> [--index]")
 	}
 
 	sourceIdentifier := args[0]
 	targetIdentifier := args[1]
-
 	useIndex := false
-	if _, err := strconv.Atoi(sourceIdentifier); err == nil {
-		if _, err := strconv.Atoi(targetIdentifier); err == nil {
-			useIndex = true
-		} else {
-			return fmt.Errorf("both source and target must be of the same type (index or logical index)")
-		}
+
+	// Check for --index flag
+	if len(args) > 2 && args[2] == "--index" {
+		useIndex = true
 	}
 
 	err := c.MindMap.MoveNode(sourceIdentifier, targetIdentifier, useIndex)
@@ -130,31 +144,31 @@ func (c *CLI) handleShow(args []string) error {
 }
 
 func (c *CLI) handleSort(args []string) error {
-    identifier := ""
-    field := ""
-    reverse := false
-    useIndex := false
-    for i := 0; i < len(args); i++ {
-        arg := strings.ToLower(args[i])
-        switch arg {
-        case "--reverse":
-            reverse = true
-        case "--index":
-            useIndex = true
-        default:
-            if identifier == "" {
-                identifier = args[i]
-            } else if field == "" {
-                field = args[i]
-            }
-        }
-    }
-    err := c.MindMap.Sort(identifier, field, reverse, useIndex)
-    if err != nil {
-        return err
-    }
-    fmt.Println("Sorted successfully")
-    return nil
+	identifier := ""
+	field := ""
+	reverse := false
+	useIndex := false
+	for i := 0; i < len(args); i++ {
+		arg := strings.ToLower(args[i])
+		switch arg {
+		case "--reverse":
+			reverse = true
+		case "--index":
+			useIndex = true
+		default:
+			if identifier == "" {
+				identifier = args[i]
+			} else if field == "" {
+				field = args[i]
+			}
+		}
+	}
+	err := c.MindMap.Sort(identifier, field, reverse, useIndex)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Sorted successfully")
+	return nil
 }
 
 func (c *CLI) handleSave(args []string) error {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -65,56 +66,26 @@ func main() {
 	cli := cli.NewCLI(mm, rl)
 
 	// Main loop
-    for {
-        line, err := rl.Readline()
-        if err == readline.ErrInterrupt {
-            fmt.Println("Use 'exit' or 'quit' to exit the program.")
-            continue
-        } else if err == io.EOF {
-            break
-        }
+	for {
+		line, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			fmt.Println("Use 'exit' or 'quit' to exit the program.")
+			continue
+		} else if err == io.EOF {
+			break
+		}
 
-        line = strings.TrimSpace(line)
-        if len(line) == 0 {
-            continue
-        }
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
 
-        args := parseArgs(line)
-        if err := cli.ExecuteCommand(args); err != nil {
-            if err == io.EOF {
-                break // Exit the loop if ExecuteCommand returns io.EOF
-            }
-            fmt.Println("Error:", err)
-        }
-    }
-}
-
-func parseArgs(input string) []string {
-	var args []string
-	var currentArg strings.Builder
-	inQuotes := false
-
-	for _, char := range input {
-		switch char {
-		case '"':
-			inQuotes = !inQuotes
-		case ' ':
-			if !inQuotes {
-				if currentArg.Len() > 0 {
-					args = append(args, currentArg.String())
-					currentArg.Reset()
-				}
-			} else {
-				currentArg.WriteRune(char)
+		args := cli.ParseArgs(line)
+		if err := cli.ExecuteCommand(args); err != nil {
+			if errors.Is(err, io.EOF) {
+				break // Exit the loop if ExecuteCommand returns an error containing io.EOF
 			}
-		default:
-			currentArg.WriteRune(char)
+			fmt.Println("Error:", err)
 		}
 	}
-
-	if currentArg.Len() > 0 {
-		args = append(args, currentArg.String())
-	}
-
-	return args
 }

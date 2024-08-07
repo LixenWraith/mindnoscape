@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"mindnoscape/local-app/internal/mindmap"
 	"github.com/chzyer/readline"
+	"mindnoscape/local-app/internal/mindmap"
 )
 
 type CLI struct {
@@ -22,25 +22,25 @@ func NewCLI(mm *mindmap.MindMap, rl *readline.Instance) *CLI {
 }
 
 func (c *CLI) Run() error {
-    line, err := c.RL.Readline()
-    if err == readline.ErrInterrupt {
-        return err
-    } else if err == io.EOF {
-        return err
-    } else if err != nil {
-        return err
-    }
+	line, err := c.RL.Readline()
+	if err == readline.ErrInterrupt {
+		return err
+	} else if err == io.EOF {
+		return err
+	} else if err != nil {
+		return err
+	}
 
-    line = strings.TrimSpace(line)
-    if len(line) == 0 {
-        return nil
-    }
+	line = strings.TrimSpace(line)
+	if len(line) == 0 {
+		return nil
+	}
 
-    args := c.parseArgs(line)
-    return c.ExecuteCommand(args)
+	args := c.ParseArgs(line)
+	return c.ExecuteCommand(args)
 }
 
-func (c *CLI) parseArgs(input string) []string {
+func (c *CLI) ParseArgs(input string) []string {
 	var args []string
 	var currentArg strings.Builder
 	inQuotes := false
@@ -71,36 +71,43 @@ func (c *CLI) parseArgs(input string) []string {
 }
 
 func (c *CLI) ExecuteCommand(args []string) error {
-    if len(args) == 0 {
-        return fmt.Errorf("no command provided")
-    }
+	if len(args) == 0 {
+		return fmt.Errorf("no command provided")
+	}
 
-    switch args[0] {
-    case "add":
-        return c.handleAdd(args[1:])
-    case "del":
-        return c.handleDelete(args[1:])
-    case "mod":
-        return c.handleModify(args[1:])
-    case "move":
-        return c.handleMove(args[1:])
-    case "show":
-        return c.handleShow(args[1:])
-    case "save":
-        return c.handleSave(args[1:])
-    case "load":
-        return c.handleLoad(args[1:])
+	switch args[0] {
+	case "add":
+		return c.handleAdd(args[1:])
+	case "del":
+		return c.handleDelete(args[1:])
+	case "clear":
+		return c.handleClear(args[1:])
+	case "mod":
+		return c.handleModify(args[1:])
+	case "move":
+		return c.handleMove(args[1:])
+	case "show":
+		return c.handleShow(args[1:])
+	case "save":
+		return c.handleSave(args[1:])
+	case "load":
+		return c.handleLoad(args[1:])
 	case "sort":
-        return c.handleSort(args[1:])
-    case "help":
-        return c.handleHelp(args[1:])
-    case "exit", "quit":
-        fmt.Println("Exiting...")
-        c.RL.Close()
-        return io.EOF // Using io.EOF to signal that we want to exit
+		return c.handleSort(args[1:])
+	case "help":
+		return c.handleHelp(args[1:])
+	case "exit", "quit":
+		fmt.Println("Exiting...")
+		err := c.RL.Close()
+		if err != nil {
+			// Log the error but still proceed with exit
+			fmt.Printf("Error closing readline: %v\n", err)
+		}
+		// Wrap both the potential close error and EOF in a custom error
+		return fmt.Errorf("exit requested: %w", io.EOF)
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
-    }
+	}
 }
 
 // The handle* functions (handleAdd, handleDelete, etc.) will be implemented in commands.go
@@ -134,6 +141,10 @@ Description: Deletes the node at the specified logical index or index and all it
 - <logical index>: The logical index of the node to delete.
 - [--index]: Optional flag to use index instead of logical index.
 Example: del 1.2`,
+
+	"clear": `Syntax: clear
+Description: Clears all nodes from the mind map, leaving only the root node.
+Example: clear`,
 
 	"mod": `Syntax: mod <logical index> [content] [<extra field label>:<extra field value>]... [--index]
 Description: Modifies the content or extra fields of the node at the specified logical index or index.
@@ -194,8 +205,3 @@ Description: Exits the program.`,
 	"exit": `Syntax: exit
 Description: Exits the program.`,
 }
-
-
-
-
-

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"mindnoscape/local-app/internal/models"
 )
@@ -26,7 +26,7 @@ func ExportToFile(root *models.Node, filename string, format string) error {
 		return fmt.Errorf("failed to marshal mind map: %v", err)
 	}
 
-	err = ioutil.WriteFile(filename, data, 0644)
+	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write file: %v", err)
 	}
@@ -35,7 +35,7 @@ func ExportToFile(root *models.Node, filename string, format string) error {
 }
 
 func ImportFromFile(filename string, format string) (*models.Node, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %v", err)
 	}
@@ -89,37 +89,37 @@ func SaveToFile(store Store, filename string, format string) error {
 }
 
 func LoadFromFile(store Store, filename string, format string) error {
-    root, err := ImportFromFile(filename, format)
-    if err != nil {
-        return err
-    }
+	root, err := ImportFromFile(filename, format)
+	if err != nil {
+		return err
+	}
 
-    // Clear existing data
-    if err := store.ClearAllNodes(); err != nil {
-        return fmt.Errorf("failed to clear existing nodes: %v", err)
-    }
+	// Clear existing data
+	if err := store.ClearAllNodes(); err != nil {
+		return fmt.Errorf("failed to clear existing nodes: %v", err)
+	}
 
-    // Insert new data
-    return insertNodeRecursive(store, root, 0)
+	// Insert new data
+	return insertNodeRecursive(store, root, 0)
 }
 
 func insertNodeRecursive(store Store, node *models.Node, parentID int) error {
-    // Generate a temporary logical index
-    tempLogicalIndex := fmt.Sprintf("%d", node.Index)
-    
-    err := store.AddNode(parentID, node.Content, node.Extra, tempLogicalIndex)
-    if err != nil {
-        return fmt.Errorf("failed to add node: %v", err)
-    }
+	// Generate a temporary logical index
+	tempLogicalIndex := fmt.Sprintf("%d", node.Index)
 
-    fmt.Printf("Inserted node: Content=%s, ParentID=%d\n", node.Content, parentID)
+	err := store.AddNode(parentID, node.Content, node.Extra, tempLogicalIndex)
+	if err != nil {
+		return fmt.Errorf("failed to add node: %v", err)
+	}
 
-    for _, child := range node.Children {
-        err = insertNodeRecursive(store, child, node.Index)
-        if err != nil {
-            return err
-        }
-    }
+	fmt.Printf("Inserted node: Content=%s, ParentID=%d\n", node.Content, parentID)
 
-    return nil
+	for _, child := range node.Children {
+		err = insertNodeRecursive(store, child, node.Index)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
