@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"mindnoscape/local-app/internal/mindmap"
 	"mindnoscape/local-app/internal/models"
+	"sort"
 	"strings"
 
 	"mindnoscape/local-app/internal/storage"
@@ -20,12 +22,7 @@ func (c *CLI) handleNew(args []string) error {
 		return err
 	}
 
-	fmt.Printf("New mindmap '%s' created and switched to.\n", name)
-
-	// Debug: Print the root node details
-	root := c.MindMap.CurrentMindMap.Root
-	fmt.Printf("Root node created: Index=%d, ParentID=%d, Content='%s', LogicalIndex='%s'\n",
-		root.Index, root.ParentID, root.Content, root.LogicalIndex)
+	fmt.Printf("New mindmap '%s' created and switched to\n", name)
 
 	// Update the prompt
 	c.Prompt = fmt.Sprintf("%s > ", name)
@@ -38,20 +35,20 @@ func (c *CLI) handleSwitch(args []string) error {
 	// First, check if there are any mindmaps available
 	mindmaps := c.MindMap.ListMindMaps()
 	if len(mindmaps) == 0 {
-		fmt.Println("No mindmaps available. Use 'new' to create a new mindmap or 'load' to load one from a file.")
+		fmt.Println("No mindmaps available, use 'new' to create a new mindmap or 'load' to load one from a file")
 		return nil
 	}
 
 	if len(args) == 0 {
 		// Check if we're currently in a mindmap
 		if c.MindMap.CurrentMindMap == nil {
-			fmt.Println("Not currently in any mindmap. Use 'switch <mindmap name>' to switch to a mindmap.")
+			fmt.Println("Not currently in any mindmap, use 'switch <mindmap name>' to switch to a mindmap")
 			return nil
 		}
 		// Switch out of the current mindmap
 		c.MindMap.CurrentMindMap = nil
 		c.Prompt = "> "
-		fmt.Println("Switched out of the current mindmap.")
+		fmt.Println("Switched out of the current mindmap")
 		return nil
 	}
 
@@ -61,7 +58,7 @@ func (c *CLI) handleSwitch(args []string) error {
 		return err
 	}
 
-	c.Prompt = fmt.Sprintf("%s > ", c.MindMap.CurrentMindMap.Root.Content)
+	c.updatePrompt()
 	fmt.Printf("Switched to mindmap '%s'.\n", name)
 	return nil
 }
@@ -74,7 +71,7 @@ func (c *CLI) handleList(args []string) error {
 	mindmaps := c.MindMap.ListMindMaps()
 
 	if len(mindmaps) == 0 {
-		fmt.Println("No mindmaps available.")
+		fmt.Println("No mindmaps available")
 	} else {
 		fmt.Println("Available mindmaps:")
 		for i, name := range mindmaps {
@@ -149,7 +146,7 @@ func (c *CLI) handleClear(args []string) error {
 				return fmt.Errorf("failed to clear mindmap '%s': %v", mindmapName, err)
 			}
 			c.Prompt = "> "
-			fmt.Printf("Mind map '%s' cleared and removed. Switched out of the mindmap.\n", mindmapName)
+			fmt.Printf("Mind map '%s' cleared and removed. Switched out of the mindmap\n", mindmapName)
 		} else {
 			// Clear all mindmaps
 			mindmaps := c.MindMap.ListMindMaps()
@@ -160,7 +157,7 @@ func (c *CLI) handleClear(args []string) error {
 				}
 				delete(c.MindMap.MindMaps, name)
 			}
-			fmt.Println("All mind maps cleared. Database is now clean.")
+			fmt.Println("All mind maps cleared")
 		}
 	} else {
 		// Mindmap name given as argument
@@ -180,7 +177,7 @@ func (c *CLI) handleClear(args []string) error {
 				return fmt.Errorf("failed to clear mindmap '%s': %v", mindmapName, err)
 			}
 			c.Prompt = "> "
-			fmt.Printf("Mind map '%s' cleared and removed. Switched out of the mindmap.\n", mindmapName)
+			fmt.Printf("Mind map '%s' cleared and removed\nSwitched out of the mindmap\n", mindmapName)
 		} else {
 			// Clear specified mindmap without switching
 			err := c.MindMap.Store.ClearAllNodes(mindmapName)
@@ -188,7 +185,7 @@ func (c *CLI) handleClear(args []string) error {
 				return fmt.Errorf("failed to clear mindmap '%s': %v", mindmapName, err)
 			}
 			delete(c.MindMap.MindMaps, mindmapName)
-			fmt.Printf("Mind map '%s' cleared and removed.\n", mindmapName)
+			fmt.Printf("Mind map '%s' cleared and removed\n", mindmapName)
 		}
 	}
 
@@ -368,7 +365,7 @@ func (c *CLI) handleLoad(args []string) error {
 	if isCurrentMindmap {
 		c.MindMap.CurrentMindMap = nil
 		c.Prompt = "> "
-		fmt.Printf("Switched out of mindmap '%s' before reloading.\n", mindmapName)
+		fmt.Printf("Switched out of mindmap '%s' before reloading\n", mindmapName)
 	}
 
 	if exists {
@@ -410,10 +407,66 @@ func (c *CLI) handleLoad(args []string) error {
 			return fmt.Errorf("failed to switch back to mindmap '%s': %v", mindmapName, err)
 		}
 		c.Prompt = fmt.Sprintf("%s > ", mindmapName)
-		fmt.Printf("Switched back to mindmap '%s'.\n", mindmapName)
+		fmt.Printf("Switched back to mindmap '%s'\n", mindmapName)
 	}
 
 	return nil
+}
+
+func (c *CLI) handleFind(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: find <query> [--index]")
+	}
+
+	query := args[0]
+	showIndex := false
+
+	// Check for --index flag
+	if len(args) > 1 && args[1] == "--index" {
+		showIndex = true
+	}
+
+	// If the query is enclosed in quotes, remove them
+	if strings.HasPrefix(query, "\"") && strings.HasSuffix(query, "\"") {
+		query = query[1 : len(query)-1]
+	}
+
+	if c.MindMap.CurrentMindMap == nil {
+		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
+	}
+
+	matches := c.MindMap.FindNodes(query)
+
+	if len(matches) == 0 {
+		fmt.Println("No matches found.")
+		return nil
+	}
+
+	fmt.Printf("Found %d matches:\n", len(matches))
+	for _, node := range matches {
+		c.printNode(node, showIndex)
+	}
+
+	return nil
+}
+
+func (c *CLI) printNode(node *models.Node, showIndex bool) {
+	fmt.Printf("LogicalIndex: %s, Content: %s", node.LogicalIndex, node.Content)
+	if showIndex {
+		fmt.Printf(" [%d]", node.Index)
+	}
+
+	// Add extra fields
+	if len(node.Extra) > 0 {
+		var extraFields []string
+		for k, v := range node.Extra {
+			extraFields = append(extraFields, fmt.Sprintf("%s:%s", k, v))
+		}
+		sort.Strings(extraFields) // Sort extra fields for consistent output
+		fmt.Printf(" %s", strings.Join(extraFields, " "))
+	}
+
+	fmt.Println() // End the line
 }
 
 func (c *CLI) handleHelp(args []string) error {
@@ -423,4 +476,13 @@ func (c *CLI) handleHelp(args []string) error {
 		c.printHelp("")
 	}
 	return nil
+}
+
+func (c *CLI) handleExit() error {
+	fmt.Println("Exiting...")
+	err := c.RL.Close()
+	if err != nil {
+		fmt.Printf("Error closing readline: %v\n", err)
+	}
+	return fmt.Errorf("exit requested: %w", io.EOF)
 }

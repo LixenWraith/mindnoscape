@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	// "sync"
 
 	"mindnoscape/local-app/internal/models"
 	"mindnoscape/local-app/internal/storage"
@@ -21,6 +22,7 @@ type MindMapManager struct {
 	Store          storage.Store
 	MindMaps       map[string]*MindMap
 	CurrentMindMap *MindMap
+	// mutex          sync.RWMutex
 }
 
 func NewMindMapManager(store storage.Store) (*MindMapManager, error) {
@@ -46,8 +48,16 @@ func NewMindMapManager(store storage.Store) (*MindMapManager, error) {
 	return mm, nil
 }
 
+func (mm *MindMapManager) mindMapExists(name string) bool {
+	_, exists := mm.MindMaps[name]
+	return exists
+}
+
 func (mm *MindMapManager) CreateNewMindMap(name string) error {
-	if _, exists := mm.MindMaps[name]; exists {
+	// mm.mutex.Lock()
+	// defer mm.mutex.Unlock()
+
+	if mm.mindMapExists(name) {
 		return fmt.Errorf("mindmap '%s' already exists", name)
 	}
 
@@ -79,12 +89,11 @@ func (mm *MindMapManager) CreateNewMindMap(name string) error {
 }
 
 func (mm *MindMapManager) SwitchMindMap(name string) error {
-	mindmap, exists := mm.MindMaps[name]
-	if !exists {
+	if !mm.mindMapExists(name) {
 		return fmt.Errorf("mindmap '%s' does not exist", name)
 	}
 
-	mm.CurrentMindMap = mindmap
+	mm.CurrentMindMap = mm.MindMaps[name]
 
 	// Debug: Print raw DB structure
 	if err := mm.Store.DebugPrintDBStructure(name); err != nil {
@@ -99,28 +108,21 @@ func (mm *MindMapManager) SwitchMindMap(name string) error {
 	return nil
 }
 
-func (mm *MindMapManager) loadNodesForMindMap(name string) error {
-	nodes, err := mm.Store.GetAllNodesForMindMap(name)
-	if err != nil {
-		return err
-	}
-
-	mindmap := mm.MindMaps[name]
-	mindmap.Nodes = make(map[int]*models.Node)
-	mindmap.MaxIndex = 0
-
+func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.Node) error {
 	for _, node := range nodes {
 		mindmap.Nodes[node.Index] = node
 		if node.Index > mindmap.MaxIndex {
 			mindmap.MaxIndex = node.Index
 		}
-		fmt.Printf("Loaded node: Index=%d, ParentID=%d, Content='%s', LogicalIndex='%s'\n",
-			node.Index, node.ParentID, node.Content, node.LogicalIndex)
+		node.Children = []*models.Node{}
 
-		if node.Index == 0 {
+		if node.ParentID == -1 {
 			mindmap.Root = node
-			fmt.Printf("Root node identified: Index=%d, Content='%s'\n", node.Index, node.Content)
 		}
+	}
+
+	if mindmap.Root == nil {
+		return fmt.Errorf("root node not found")
 	}
 
 	// Build tree structure
@@ -134,12 +136,32 @@ func (mm *MindMapManager) loadNodesForMindMap(name string) error {
 		}
 	}
 
-	fmt.Printf("Mind map structure built. Root has %d children\n", len(mindmap.Root.Children))
+	return nil
+}
+
+func (mm *MindMapManager) loadNodesForMindMap(name string) error {
+	nodes, err := mm.Store.GetAllNodesForMindMap(name)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve nodes for mindmap '%s': %v", name, err)
+	}
+
+	mindmap := mm.MindMaps[name]
+	mindmap.Nodes = make(map[int]*models.Node)
+	mindmap.MaxIndex = 0
+
+	err = mm.buildTreeFromNodes(mindmap, nodes)
+	if err != nil {
+		return fmt.Errorf("failed to build tree structure: %v", err)
+	}
 
 	return nil
 }
 
 func (mm *MindMapManager) LoadNodes(mindmapName string) error {
+	if !mm.mindMapExists(mindmapName) {
+		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	}
+
 	nodes, err := mm.Store.GetAllNodesForMindMap(mindmapName)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve nodes: %v", err)
@@ -150,38 +172,9 @@ func (mm *MindMapManager) LoadNodes(mindmapName string) error {
 		MaxIndex: 0,
 	}
 
-	// First pass: create all nodes
-	for _, node := range nodes {
-		newMindMap.Nodes[node.Index] = node
-		if node.Index > newMindMap.MaxIndex {
-			newMindMap.MaxIndex = node.Index
-		}
-		node.Children = []*models.Node{}
-		fmt.Printf("Loaded node: Index=%d, ParentID=%d, Content='%s', LogicalIndex='%s'\n",
-			node.Index, node.ParentID, node.Content, node.LogicalIndex)
-
-		if node.ParentID == -1 {
-			newMindMap.Root = node
-			fmt.Printf("Root node identified: Index=%d, Content='%s'\n", node.Index, node.Content)
-		}
-	}
-
-	if newMindMap.Root == nil {
-		return fmt.Errorf("root node not found in mindmap '%s'", mindmapName)
-	}
-
-	// Second pass: build tree structure
-	for _, node := range newMindMap.Nodes {
-		if node != newMindMap.Root {
-			parent, exists := newMindMap.Nodes[node.ParentID]
-			if exists {
-				parent.Children = append(parent.Children, node)
-				fmt.Printf("Added node %d (%s) as child of node %d (%s)\n",
-					node.Index, node.Content, parent.Index, parent.Content)
-			} else {
-				return fmt.Errorf("parent node %d not found for node %d", node.ParentID, node.Index)
-			}
-		}
+	err = mm.buildTreeFromNodes(newMindMap, nodes)
+	if err != nil {
+		return fmt.Errorf("failed to build tree structure: %v", err)
 	}
 
 	// Sort children of each node based on LogicalIndex
@@ -196,21 +189,10 @@ func (mm *MindMapManager) LoadNodes(mindmapName string) error {
 	}
 	sortNodeChildren(newMindMap.Root)
 
-	fmt.Printf("Mind map structure built. Root has %d children\n", len(newMindMap.Root.Children))
-
 	// Update the MindMaps map with the new mindmap
 	mm.MindMaps[mindmapName] = newMindMap
 
 	return nil
-}
-
-func (mm *MindMapManager) debugPrintTree(node *models.Node, depth int) {
-	indent := strings.Repeat("  ", depth)
-	fmt.Printf("%sNode: Index=%d, Content='%s', LogicalIndex='%s', Children=%d\n",
-		indent, node.Index, node.Content, node.LogicalIndex, len(node.Children))
-	for _, child := range node.Children {
-		mm.debugPrintTree(child, depth+1)
-	}
 }
 
 func (mm *MindMapManager) validateAndUpdateLogicalIndices(node *models.Node, parentIndex string) {
@@ -243,32 +225,36 @@ func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
 	}
 }
 
-func (mm *MindMapManager) findNodeByLogicalIndex(logicalIndex string) *models.Node {
+func (mm *MindMapManager) findNodeByLogicalIndex(logicalIndex string) (*models.Node, error) {
 	if mm.CurrentMindMap == nil {
-		return nil
+		return nil, fmt.Errorf("no current mindmap selected")
 	}
 
 	if logicalIndex == "0" {
-		return mm.CurrentMindMap.Root
+		return mm.CurrentMindMap.Root, nil
 	}
 
 	parts := strings.Split(logicalIndex, ".")
 	currentNode := mm.CurrentMindMap.Root
 
-	for _, part := range parts {
+	for i, part := range parts {
 		index, err := strconv.Atoi(part)
-		if err != nil || index < 1 || index > len(currentNode.Children) {
-			return nil
+		if err != nil {
+			return nil, fmt.Errorf("invalid logical index part '%s': not a number", part)
+		}
+		if index < 1 || index > len(currentNode.Children) {
+			return nil, fmt.Errorf("invalid logical index: part %d (%s) is out of range", i+1, part)
 		}
 		currentNode = currentNode.Children[index-1]
 	}
 
-	return currentNode
+	return currentNode, nil
 }
 
 func (mm *MindMapManager) Show(logicalIndex string, showIndex bool) error {
-	if err := mm.ensureCurrentMindMap(); err != nil {
-		return err
+	if mm.CurrentMindMap == nil {
+
+		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
 	}
 
 	if mm.CurrentMindMap.Root == nil {
@@ -276,19 +262,23 @@ func (mm *MindMapManager) Show(logicalIndex string, showIndex bool) error {
 	}
 
 	var node *models.Node
+
 	if logicalIndex == "" {
 		node = mm.CurrentMindMap.Root
 		fmt.Printf("Showing entire mind map from root: Index=%d, Content='%s'\n", node.Index, node.Content)
 	} else {
-		node = mm.findNodeByLogicalIndex(logicalIndex)
-		if node == nil {
-			return fmt.Errorf("node not found with logical index: %s", logicalIndex)
+		var err error
+		node, err = mm.findNodeByLogicalIndex(logicalIndex)
+		if err != nil {
+			return fmt.Errorf("failed to find node: %v", err)
 		}
 		fmt.Printf("Showing subtree from node: Index=%d, Content='%s', LogicalIndex='%s'\n", node.Index, node.Content, node.LogicalIndex)
 	}
 
 	fmt.Println("Mind Map Structure:")
-	mm.visualize(node, "", true, showIndex)
+	if err := mm.visualize(node, "", true, showIndex); err != nil {
+		return fmt.Errorf("failed to visualize mind map: %v", err)
+	}
 
 	return nil
 }
@@ -317,14 +307,10 @@ func (mm *MindMapManager) checkParentChildRelationships() {
 	}
 }
 
-func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast bool, showIndex bool) {
+func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast bool, showIndex bool) error {
 	if node == nil {
-		fmt.Println("DEBUG: WARNING: Attempted to visualize a nil node")
-		return
+		return fmt.Errorf("attempted to visualize a nil node")
 	}
-
-	fmt.Printf("DEBUG: Visualizing node: Index=%d, ParentID=%d, Content='%s', LogicalIndex='%s', Children=%d\n",
-		node.Index, node.ParentID, node.Content, node.LogicalIndex, len(node.Children))
 
 	var line strings.Builder
 
@@ -363,6 +349,11 @@ func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast boo
 	})
 
 	for i, child := range node.Children {
-		mm.visualize(child, prefix, i == len(node.Children)-1, showIndex)
+		err := mm.visualize(child, prefix, i == len(node.Children)-1, showIndex)
+		if err != nil {
+			return fmt.Errorf("error visualizing child node: %v", err)
+		}
 	}
+
+	return nil
 }

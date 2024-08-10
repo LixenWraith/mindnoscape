@@ -150,6 +150,8 @@ func insertNodeRecursive(store Store, mindmapName string, node *models.Node, par
 	return nil
 }
 
+// marshalToXML converts a Node structure to XML format.
+// It recursively processes the node and its children, including extra fields.
 func marshalToXML(root *models.Node) ([]byte, error) {
 	type xmlField struct {
 		Key   string `xml:"key,attr"`
@@ -185,6 +187,8 @@ func marshalToXML(root *models.Node) ([]byte, error) {
 	return xml.MarshalIndent(xmlRoot, "", "  ")
 }
 
+// unmarshalFromXML converts XML data back into a Node structure.
+// It recursively rebuilds the node hierarchy and extra fields.
 func unmarshalFromXML(data []byte) (*models.Node, error) {
 	type xmlField struct {
 		Key   string `xml:"key,attr"`

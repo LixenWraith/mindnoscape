@@ -23,14 +23,23 @@ func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
 	}
 }
 
+func (c *CLI) updatePrompt() {
+	if c.MindMap.CurrentMindMap != nil {
+		c.Prompt = fmt.Sprintf("%s > ", c.MindMap.CurrentMindMap.Root.Content)
+	} else {
+		c.Prompt = "> "
+	}
+	c.RL.SetPrompt(c.Prompt)
+}
+
 func (c *CLI) Run() error {
 	line, err := c.RL.Readline()
 	if err == readline.ErrInterrupt {
-		return err
+		return fmt.Errorf("operation interrupted by user")
 	} else if err == io.EOF {
-		return err
+		return fmt.Errorf("end of input reached")
 	} else if err != nil {
-		return err
+		return fmt.Errorf("error reading input: %v", err)
 	}
 
 	line = strings.TrimSpace(line)
@@ -110,17 +119,12 @@ func (c *CLI) ExecuteCommand(args []string) error {
 		return c.handleLoad(args[1:])
 	case "sort":
 		return c.handleSort(args[1:])
+	case "find":
+		return c.handleFind(args[1:])
 	case "help":
 		return c.handleHelp(args[1:])
 	case "exit", "quit":
-		fmt.Println("Exiting...")
-		err := c.RL.Close()
-		if err != nil {
-			// Log the error but still proceed with exit
-			fmt.Printf("Error closing readline: %v\n", err)
-		}
-		// Wrap both the potential close error and EOF in a custom error
-		return fmt.Errorf("exit requested: %w", io.EOF)
+		return c.handleExit()
 	default:
 		return fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -196,6 +200,13 @@ Description: Moves the node at the source logical index to become a child of the
 - [--index]: Optional flag to use index instead of logical index.
 Example: move 1.2 2`,
 
+	"insert": `Syntax: insert <source logical index> <target logical index> [--index]
+Description: Inserts the source node and its children before the target node, making them siblings.
+- <source logical index>: The logical index of the node to insert.
+- <target logical index>: The logical index of the node before which to insert.
+- [--index]: Optional flag to use index instead of logical index.
+Example: insert 1.1 2`,
+
 	"sort": `Syntax: sort [logical index] [extra field label] [--reverse] [--index]
 Description: Sorts the children of the specified node based on content or an extra field.
 - [logical index]: Optional logical index of the node whose children to sort. If omitted, sorts all nodes.
@@ -203,6 +214,12 @@ Description: Sorts the children of the specified node based on content or an ext
 - [--reverse]: Optional flag to sort in descending order.
 - [--index]: Optional flag to use index instead of logical index.
 Example: sort 1 priority --reverse`,
+
+	"find": `Syntax: find <query> [--index]
+Description: Searches for nodes whose content or extra fields contain the specified query.
+- <query>: The search term to look for in node content and extra fields.
+- [--index]: Optional flag to show node indices in the output.
+Example: find "important task" --index`,
 
 	"show": `Syntax: show [logical index] [--index]
 Description: Displays the mindmap or a specific subtree.
@@ -221,18 +238,6 @@ Description: Loads a mindmap from a JSON or XML file.
 - [json/xml]: Optional format to load from. Default is JSON if not specified.
 - [filename]: Optional filename to load from. If omitted, loads from "mindmap.json" or "mindmap.xml".
 Example: load xml mymap.xml`,
-
-	"insert": `Syntax: insert <source logical index> <target logical index> [--index]
-Description: Inserts the source node and its children before the target node, making them siblings.
-- <source logical index>: The logical index of the node to insert.
-- <target logical index>: The logical index of the node before which to insert.
-- [--index]: Optional flag to use index instead of logical index.
-Example: insert 1.1 2`,
-
-	"find": `Syntax: find <query>
-Description: Searches for nodes whose content or extra fields contain the specified query.
-- <query>: The search term to look for in node content and extra fields.
-Example: find important`,
 
 	"quit": `Syntax: quit
 Description: Exits the program.`,

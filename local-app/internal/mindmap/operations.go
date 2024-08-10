@@ -5,6 +5,7 @@ import (
 	"mindnoscape/local-app/internal/models"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 func (mm *MindMapManager) ListMindMaps() []string {
@@ -23,20 +24,31 @@ func (mm *MindMapManager) ensureCurrentMindMap() error {
 	return nil
 }
 
+// findNode is a helper function that finds a node by either index or logical index.
+func (mm *MindMapManager) findNode(identifier string, useIndex bool) (*models.Node, error) {
+	if useIndex {
+		index, err := strconv.Atoi(identifier)
+		if err != nil {
+			return nil, fmt.Errorf("invalid index: %v", err)
+		}
+		node := mm.CurrentMindMap.Nodes[index]
+		if node == nil {
+			return nil, fmt.Errorf("node not found with index: %d", index)
+		}
+		return node, nil
+	} else {
+		return mm.findNodeByLogicalIndex(identifier)
+	}
+}
+
 func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
 
-	var parentNode *models.Node
-	if useIndex {
-		index, err := strconv.Atoi(parentIdentifier)
-		if err != nil {
-			return fmt.Errorf("invalid index: %v", err)
-		}
-		parentNode = mm.CurrentMindMap.Nodes[index]
-	} else {
-		parentNode = mm.findNodeByLogicalIndex(parentIdentifier)
+	parentNode, err := mm.findNode(parentIdentifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find parent node: %v", err)
 	}
 
 	if parentNode == nil {
@@ -76,19 +88,9 @@ func (mm *MindMapManager) DeleteNode(identifier string, useIndex bool) error {
 		return err
 	}
 
-	var nodeToDelete *models.Node
-	if useIndex {
-		index, err := strconv.Atoi(identifier)
-		if err != nil {
-			return fmt.Errorf("invalid index: %v", err)
-		}
-		nodeToDelete = mm.CurrentMindMap.Nodes[index]
-	} else {
-		nodeToDelete = mm.findNodeByLogicalIndex(identifier)
-	}
-
-	if nodeToDelete == nil {
-		return fmt.Errorf("node not found")
+	nodeToDelete, err := mm.findNode(identifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find node to delete: %v", err)
 	}
 
 	if nodeToDelete == mm.CurrentMindMap.Root {
@@ -118,7 +120,7 @@ func (mm *MindMapManager) DeleteNode(identifier string, useIndex bool) error {
 	mm.deleteNodeRecursive(nodeToDelete)
 
 	// Update logical indexes
-	err := mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after deletion: %v", err)
 	}
@@ -161,8 +163,8 @@ func (mm *MindMapManager) deleteNodeRecursive(node *models.Node) {
 }
 
 func (mm *MindMapManager) Clear() error {
-	if err := mm.ensureCurrentMindMap(); err != nil {
-		return err
+	if mm.CurrentMindMap == nil {
+		return fmt.Errorf("no mindmap selected")
 	}
 
 	mindmapName := mm.CurrentMindMap.Root.Content
@@ -186,15 +188,9 @@ func (mm *MindMapManager) ModifyNode(identifier string, content string, extra ma
 		return err
 	}
 
-	var node *models.Node
-	if useIndex {
-		index, err := strconv.Atoi(identifier)
-		if err != nil {
-			return fmt.Errorf("invalid index: %v", err)
-		}
-		node = mm.CurrentMindMap.Nodes[index]
-	} else {
-		node = mm.findNodeByLogicalIndex(identifier)
+	node, err := mm.findNode(identifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find node to modify: %v", err)
 	}
 
 	if node == nil {
@@ -225,26 +221,14 @@ func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, us
 		return err
 	}
 
-	var sourceNode, targetNode *models.Node
-	if useIndex {
-		sourceIndex, err := strconv.Atoi(sourceIdentifier)
-		if err != nil {
-			return fmt.Errorf("invalid source index: %v", err)
-		}
-		sourceNode = mm.CurrentMindMap.Nodes[sourceIndex]
-
-		targetIndex, err := strconv.Atoi(targetIdentifier)
-		if err != nil {
-			return fmt.Errorf("invalid target index: %v", err)
-		}
-		targetNode = mm.CurrentMindMap.Nodes[targetIndex]
-	} else {
-		sourceNode = mm.findNodeByLogicalIndex(sourceIdentifier)
-		targetNode = mm.findNodeByLogicalIndex(targetIdentifier)
+	sourceNode, err := mm.findNode(sourceIdentifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find source node: %v", err)
 	}
 
-	if sourceNode == nil || targetNode == nil {
-		return fmt.Errorf("source or target node not found")
+	targetNode, err := mm.findNode(targetIdentifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find target node: %v", err)
 	}
 
 	if sourceNode == mm.CurrentMindMap.Root {
@@ -274,7 +258,7 @@ func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, us
 	}
 
 	// Update logical indexes starting from the root
-	err := mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after move: %v", err)
 	}
@@ -287,26 +271,14 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 		return err
 	}
 
-	var sourceNode, targetNode *models.Node
-	if useIndex {
-		sourceIndex, err := strconv.Atoi(sourceIdentifier)
-		if err != nil {
-			return fmt.Errorf("invalid source index: %v", err)
-		}
-		sourceNode = mm.CurrentMindMap.Nodes[sourceIndex]
-
-		targetIndex, err := strconv.Atoi(targetIdentifier)
-		if err != nil {
-			return fmt.Errorf("invalid target index: %v", err)
-		}
-		targetNode = mm.CurrentMindMap.Nodes[targetIndex]
-	} else {
-		sourceNode = mm.findNodeByLogicalIndex(sourceIdentifier)
-		targetNode = mm.findNodeByLogicalIndex(targetIdentifier)
+	sourceNode, err := mm.findNode(sourceIdentifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find source node: %v", err)
 	}
 
-	if sourceNode == nil || targetNode == nil {
-		return fmt.Errorf("source or target node not found")
+	targetNode, err := mm.findNode(targetIdentifier, useIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find target node: %v", err)
 	}
 
 	if sourceNode == mm.CurrentMindMap.Root {
@@ -352,7 +324,7 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 	}
 
 	// Update logical indexes starting from the root
-	err := mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after insertion: %v", err)
 	}
@@ -360,22 +332,25 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 	return nil
 }
 
+// Sort sorts the children of the specified node based on content or an extra field.
+// If no node is specified, it sorts all nodes in the mindmap.
+// The sorting can be done in reverse order if the reverse flag is set.
+// If an extra field is specified, it sorts based on that field; otherwise, it sorts by content.
 func (mm *MindMapManager) Sort(identifier string, field string, reverse bool, useIndex bool) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
 
 	var node *models.Node
+	var err error
+
 	if identifier == "" {
 		node = mm.CurrentMindMap.Root
-	} else if useIndex {
-		index, err := strconv.Atoi(identifier)
-		if err != nil {
-			return fmt.Errorf("invalid index: %v", err)
-		}
-		node = mm.CurrentMindMap.Nodes[index]
 	} else {
-		node = mm.findNodeByLogicalIndex(identifier)
+		node, err = mm.findNode(identifier, useIndex)
+		if err != nil {
+			return fmt.Errorf("failed to find node to sort: %v", err)
+		}
 	}
 
 	if node == nil {
@@ -388,7 +363,7 @@ func (mm *MindMapManager) Sort(identifier string, field string, reverse bool, us
 	mm.assignLogicalIndexForSubtree(node)
 
 	// Update the database to reflect the new order
-	err := mm.updateNodeOrderInDB(mm.CurrentMindMap.Root.Content, node)
+	err = mm.updateNodeOrderInDB(mm.CurrentMindMap.Root.Content, node)
 	if err != nil {
 		return fmt.Errorf("failed to update node order in database: %v", err)
 	}
@@ -473,4 +448,25 @@ func (mm *MindMapManager) updateNodeOrderInDB(mindmapName string, node *models.N
 	}
 
 	return updateNode(node)
+}
+
+func (mm *MindMapManager) FindNodes(query string) []*models.Node {
+	if mm.CurrentMindMap == nil {
+		return nil
+	}
+
+	var matches []*models.Node
+	for _, node := range mm.CurrentMindMap.Nodes {
+		if strings.Contains(strings.ToLower(node.Content), strings.ToLower(query)) {
+			matches = append(matches, node)
+			continue
+		}
+		for _, value := range node.Extra {
+			if strings.Contains(strings.ToLower(value), strings.ToLower(query)) {
+				matches = append(matches, node)
+				break
+			}
+		}
+	}
+	return matches
 }

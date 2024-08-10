@@ -11,37 +11,6 @@ type SQLiteStore struct {
 	mindmapTables map[string]string // Maps mindmap names to table names
 }
 
-func NewSQLiteStore(db *sql.DB) (Store, error) {
-	store := &SQLiteStore{
-		db:            db,
-		mindmapTables: make(map[string]string),
-	}
-	if err := store.initSchema(); err != nil {
-		return nil, fmt.Errorf("failed to initialize schema: %v", err)
-	}
-	if err := store.loadExistingMindmaps(); err != nil {
-		return nil, fmt.Errorf("failed to load existing mindmaps: %v", err)
-	}
-	return store, nil
-}
-
-func (s *SQLiteStore) loadExistingMindmaps() error {
-	rows, err := s.db.Query("SELECT name FROM mindmaps")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		s.mindmapTables[name] = fmt.Sprintf("mindmap_%s", name)
-	}
-
-	return nil
-}
 func (s *SQLiteStore) initSchema() error {
 	_, err := s.db.Exec(`
         CREATE TABLE IF NOT EXISTS mindmaps (
@@ -61,6 +30,46 @@ func (s *SQLiteStore) initSchema() error {
         );
     `)
 	return err
+}
+
+func NewSQLiteStore(db *sql.DB) (Store, error) {
+	store := &SQLiteStore{
+		db:            db,
+		mindmapTables: make(map[string]string),
+	}
+	if err := store.initSchema(); err != nil {
+		return nil, fmt.Errorf("failed to initialize schema: %v", err)
+	}
+	if err := store.loadExistingMindmaps(); err != nil {
+		return nil, fmt.Errorf("failed to load existing mindmaps: %v", err)
+	}
+	return store, nil
+}
+
+func (s *SQLiteStore) getTableName(mindmapName string) (string, error) {
+	tableName, ok := s.mindmapTables[mindmapName]
+	if !ok {
+		return "", fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	}
+	return tableName, nil
+}
+
+func (s *SQLiteStore) loadExistingMindmaps() error {
+	rows, err := s.db.Query("SELECT name FROM mindmaps")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		s.mindmapTables[name] = fmt.Sprintf("mindmap_%s", name)
+	}
+
+	return nil
 }
 
 func (s *SQLiteStore) AddMindMap(name string) error {
@@ -139,9 +148,9 @@ func (s *SQLiteStore) MindMapExists(name string) (bool, error) {
 }
 
 func (s *SQLiteStore) DebugPrintDBStructure(mindmapName string) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
 	rows, err := s.db.Query(fmt.Sprintf(`
@@ -170,9 +179,9 @@ func (s *SQLiteStore) DebugPrintDBStructure(mindmapName string) error {
 }
 
 func (s *SQLiteStore) AddNode(mindmapName string, parentID int, content string, extra map[string]string, logicalIndex string) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
 	tx, err := s.db.Begin()
@@ -208,9 +217,9 @@ func (s *SQLiteStore) AddNode(mindmapName string, parentID int, content string, 
 }
 
 func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string) ([]*models.Node, error) {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return nil, fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.Query(fmt.Sprintf(`
@@ -230,8 +239,6 @@ func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string) ([]*models.Node,
 			return nil, err
 		}
 		nodes = append(nodes, node)
-		fmt.Printf("Loaded node from DB: Index=%d, ParentID=%d, Content=%s, LogicalIndex=%s\n",
-			node.Index, node.ParentID, node.Content, node.LogicalIndex)
 	}
 
 	// Fetch extra attributes for all nodes
@@ -339,9 +346,9 @@ func (s *SQLiteStore) GetAllNodes() ([]*models.Node, error) {
 }
 
 func (s *SQLiteStore) UpdateNode(mindmapName string, id int, content string, extra map[string]string, logicalIndex string) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
 	tx, err := s.db.Begin()
@@ -371,9 +378,9 @@ func (s *SQLiteStore) UpdateNode(mindmapName string, id int, content string, ext
 }
 
 func (s *SQLiteStore) ClearAllNodes(mindmapName string) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
 	tx, err := s.db.Begin()
@@ -407,9 +414,9 @@ func (s *SQLiteStore) ClearAllNodes(mindmapName string) error {
 }
 
 func (s *SQLiteStore) DeleteNode(mindmapName string, id int) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
 	tx, err := s.db.Begin()
@@ -432,21 +439,41 @@ func (s *SQLiteStore) DeleteNode(mindmapName string, id int) error {
 }
 
 func (s *SQLiteStore) UpdateNodeOrder(mindmapName string, nodeID int, logicalIndex string) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
-	_, err := s.db.Exec(fmt.Sprintf("UPDATE %s SET logical_index = ? WHERE id = ?", tableName), logicalIndex, nodeID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(fmt.Sprintf("UPDATE %s SET logical_index = ? WHERE id = ?", tableName), logicalIndex, nodeID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) MoveNode(mindmapName string, sourceID, targetID int) error {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+	tableName, err := s.getTableName(mindmapName)
+	if err != nil {
+		return err
 	}
 
-	_, err := s.db.Exec(fmt.Sprintf("UPDATE %s SET parent_id = ? WHERE id = ?", tableName), targetID, sourceID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(fmt.Sprintf("UPDATE %s SET parent_id = ? WHERE id = ?", tableName), targetID, sourceID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
