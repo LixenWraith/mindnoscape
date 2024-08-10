@@ -32,7 +32,7 @@ func cleanup() {
 func main() {
 	var err error
 	// Initialize SQLite database
-	db, err = sql.Open("sqlite3", "./mindmap.db")
+	db, err = sql.Open("sqlite3", "./data/mindnoscape.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -44,16 +44,16 @@ func main() {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 
-	// Initialize mindmap
-	mm, err := mindmap.NewMindMap(store)
+	// Initialize mindmap manager
+	mm, err := mindmap.NewMindMapManager(store)
 	if err != nil {
-		log.Fatalf("Failed to create mindmap: %v", err)
+		log.Fatalf("Failed to create mindmap manager: %v", err)
 	}
 
 	// Initialize readline
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "> ",
-		HistoryFile:     "/tmp/mindnoscape_history.txt",
+		HistoryFile:     "./tmp/mindnoscape_history.txt",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})
@@ -64,6 +64,8 @@ func main() {
 
 	// Initialize CLI
 	cli := cli.NewCLI(mm, rl)
+
+	fmt.Println("Welcome to Mindnoscape! Use 'help' for the list of commands.")
 
 	// Main loop
 	for {
@@ -87,5 +89,8 @@ func main() {
 			}
 			fmt.Println("Error:", err)
 		}
+
+		// Update the prompt after each command
+		rl.SetPrompt(cli.Prompt)
 	}
 }

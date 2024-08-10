@@ -10,14 +10,16 @@ import (
 )
 
 type CLI struct {
-	MindMap *mindmap.MindMap
+	MindMap *mindmap.MindMapManager
 	RL      *readline.Instance
+	Prompt  string
 }
 
-func NewCLI(mm *mindmap.MindMap, rl *readline.Instance) *CLI {
+func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
 	return &CLI{
 		MindMap: mm,
 		RL:      rl,
+		Prompt:  "> ",
 	}
 }
 
@@ -76,6 +78,18 @@ func (c *CLI) ExecuteCommand(args []string) error {
 	}
 
 	switch args[0] {
+	case "new":
+		return c.handleNew(args[1:])
+	case "switch":
+		err := c.handleSwitch(args[1:])
+		if err == nil && c.MindMap.CurrentMindMap != nil {
+			// Update the prompt only if switch was successful and we're in a mindmap
+			c.Prompt = fmt.Sprintf("%s > ", c.MindMap.CurrentMindMap.Root.Content)
+			c.RL.SetPrompt(c.Prompt)
+		}
+		return err
+	case "list":
+		return c.handleList(args[1:])
 	case "add":
 		return c.handleAdd(args[1:])
 	case "del":
@@ -86,6 +100,8 @@ func (c *CLI) ExecuteCommand(args []string) error {
 		return c.handleModify(args[1:])
 	case "move":
 		return c.handleMove(args[1:])
+	case "insert":
+		return c.handleInsert(args[1:])
 	case "show":
 		return c.handleShow(args[1:])
 	case "save":
@@ -128,6 +144,20 @@ func (c *CLI) printHelp(command string) {
 
 // commandHelp contains help text for each command.
 var commandHelp = map[string]string{
+	"new": `Syntax: new <mindmap name>
+Description: Creates a new mindmap with the specified name as its root node.
+Example: new "My Project"`,
+
+	"switch": `Syntax: switch [mindmap name]
+Description: Switches to the specified mindmap for subsequent operations. If no mindmap name is provided, switches out of the current mindmap.
+Examples: 
+  switch "My Project"
+  switch`,
+
+	"list": `Syntax: list
+Description: Lists all available mindmaps in the database.
+Example: list`,
+
 	"add": `Syntax: add <logical index> <content> [<extra field label>:<extra field value>]... [--index]
 Description: Adds a new node as a child of the node at the specified logical index or index.
 - <logical index>: The logical index of the parent node.
@@ -142,9 +172,14 @@ Description: Deletes the node at the specified logical index or index and all it
 - [--index]: Optional flag to use index instead of logical index.
 Example: del 1.2`,
 
-	"clear": `Syntax: clear
-Description: Clears all nodes from the mind map, leaving only the root node.
-Example: clear`,
+	"clear": `Syntax: clear [mindmap name]
+Description: Clears the specified mindmap or all mindmaps.
+- If no argument is given and currently in a mindmap: Clears the current mindmap and switches out.
+- If no argument is given and not in a mindmap: Clears all mindmaps, resulting in a clean database.
+- If a mindmap name is given: Clears the specified mindmap. If it's the current mindmap, also switches out.
+Examples: 
+  clear
+  clear "My Project"`,
 
 	"mod": `Syntax: mod <logical index> [content] [<extra field label>:<extra field value>]... [--index]
 Description: Modifies the content or extra fields of the node at the specified logical index or index.
