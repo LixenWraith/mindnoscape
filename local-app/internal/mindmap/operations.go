@@ -41,7 +41,7 @@ func (mm *MindMapManager) findNode(identifier string, useIndex bool) (*models.No
 	}
 }
 
-func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
+func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool, options ...interface{}) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
@@ -55,8 +55,29 @@ func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra
 		return fmt.Errorf("parent node not found")
 	}
 
-	newIndex := mm.CurrentMindMap.MaxIndex + 1
-	mm.CurrentMindMap.MaxIndex = newIndex
+	// Default addToHistory to true
+	addToHistory := true
+	var specificIndex int
+	hasSpecificIndex := false
+
+	// Process options
+	for _, option := range options {
+		switch v := option.(type) {
+		case bool:
+			addToHistory = v
+		case int:
+			specificIndex = v
+			hasSpecificIndex = true
+		}
+	}
+
+	var newIndex int
+	if hasSpecificIndex {
+		newIndex = specificIndex
+	} else {
+		newIndex = mm.CurrentMindMap.MaxIndex + 1
+		mm.CurrentMindMap.MaxIndex = newIndex
+	}
 
 	newNode := models.NewNode(newIndex, content)
 	newNode.Extra = extra
@@ -78,81 +99,127 @@ func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra
 	parentNode.Children = append(parentNode.Children, newNode)
 	mm.CurrentMindMap.Nodes[newIndex] = newNode
 
+	// Add to operation history
+	if addToHistory {
+		op := Operation{
+			Type: OpAdd,
+			AffectedNode: NodeInfo{
+				Index:    newNode.Index,
+				ParentID: parentNode.Index,
+			},
+			NewContent: content,
+			NewExtra:   extra,
+		}
+		mm.addToHistory(op)
+	}
+
 	fmt.Printf("Added new node: Index= '%v' Content='%s', LogicalIndex='%s', ParentIndex=%d\n", newNode.Index, newNode.Content, newNode.LogicalIndex, parentNode.Index)
 
 	return nil
 }
 
-func (mm *MindMapManager) DeleteNode(identifier string, useIndex bool) error {
+func (mm *MindMapManager) DeleteNode(identifier string, useIndex bool, options ...bool) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
 
-	nodeToDelete, err := mm.findNode(identifier, useIndex)
+	node, err := mm.findNode(identifier, useIndex)
 	if err != nil {
 		return fmt.Errorf("failed to find node to delete: %v", err)
 	}
 
-	if nodeToDelete == mm.CurrentMindMap.Root {
+	if node == mm.CurrentMindMap.Root {
 		return fmt.Errorf("cannot delete root node")
 	}
 
+	// Default addToHistory to true
+	addToHistory := true
+	// If an option is provided, use it
+	if len(options) > 0 {
+		addToHistory = options[0]
+	}
+
+	deletedTree := []*models.Node{node}
+	mm.getSubtreeNodes(node, &deletedTree)
+
 	// Remove from storage
-	if err := mm.Store.DeleteNode(mm.CurrentMindMap.Root.Content, nodeToDelete.Index); err != nil {
+	if err := mm.Store.DeleteNode(mm.CurrentMindMap.Root.Content, node.Index); err != nil {
 		return fmt.Errorf("failed to delete node from storage: %v", err)
 	}
 
 	// Find the parent node
-	parentNode := mm.CurrentMindMap.Nodes[nodeToDelete.ParentID]
+	parentNode := mm.CurrentMindMap.Nodes[node.ParentID]
 	if parentNode == nil {
 		return fmt.Errorf("parent node not found")
 	}
 
 	// Update in-memory structure
 	for i, child := range parentNode.Children {
-		if child == nodeToDelete {
+		if child == node {
 			parentNode.Children = append(parentNode.Children[:i], parentNode.Children[i+1:]...)
 			break
 		}
 	}
 
 	// Delete the node and its descendants recursively
-	mm.deleteNodeRecursive(nodeToDelete)
+	mm.deleteNodeRecursive(node)
 
 	// Update logical indexes
-	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.recalculateLogicalIndices(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after deletion: %v", err)
+	}
+
+	// Add to operation history
+	if addToHistory {
+		op := Operation{
+			Type: OpDelete,
+			AffectedNode: NodeInfo{
+				Index:    node.Index,
+				ParentID: node.ParentID,
+			},
+			DeletedTree: deletedTree,
+		}
+		mm.addToHistory(op)
 	}
 
 	return nil
 }
 
-func (mm *MindMapManager) updateLogicalIndexes(node *models.Node) error {
-	if err := mm.ensureCurrentMindMap(); err != nil {
-		return err
+func (mm *MindMapManager) getSubtreeNodes(node *models.Node, nodes *[]*models.Node) {
+	for _, child := range node.Children {
+		*nodes = append(*nodes, child)
+		mm.getSubtreeNodes(child, nodes)
 	}
+}
 
-	var assign func(*models.Node, string) error
-	assign = func(n *models.Node, prefix string) error {
+func (mm *MindMapManager) recalculateLogicalIndices(node *models.Node) error {
+	var recalculate func(*models.Node, string) error
+	recalculate = func(n *models.Node, parentIndex string) error {
 		for i, child := range n.Children {
-			if n == mm.CurrentMindMap.Root {
-				child.LogicalIndex = fmt.Sprintf("%d", i+1)
+			var newLogicalIndex string
+			if parentIndex == "" {
+				newLogicalIndex = fmt.Sprintf("%d", i+1)
 			} else {
-				child.LogicalIndex = fmt.Sprintf("%s.%d", prefix, i+1)
+				newLogicalIndex = fmt.Sprintf("%s.%d", parentIndex, i+1)
 			}
-			err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, child.Index, child.LogicalIndex)
-			if err != nil {
-				return fmt.Errorf("failed to update logical index for node %d: %v", child.Index, err)
+
+			if child.LogicalIndex != newLogicalIndex {
+				child.LogicalIndex = newLogicalIndex
+				err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, child.Index, child.LogicalIndex)
+				if err != nil {
+					return fmt.Errorf("failed to update logical index for node %d: %v", child.Index, err)
+				}
 			}
-			if err := assign(child, child.LogicalIndex); err != nil {
+
+			if err := recalculate(child, child.LogicalIndex); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	return assign(node, "")
+	return recalculate(node, "")
 }
 
 func (mm *MindMapManager) deleteNodeRecursive(node *models.Node) {
@@ -179,11 +246,13 @@ func (mm *MindMapManager) Clear() error {
 	// Set the current mindmap to nil
 	mm.CurrentMindMap = nil
 
+	mm.ClearOperationHistory()
+
 	fmt.Printf("Mind map '%s' cleared and removed\n", mindmapName)
 	return nil
 }
 
-func (mm *MindMapManager) ModifyNode(identifier string, content string, extra map[string]string, useIndex bool) error {
+func (mm *MindMapManager) ModifyNode(identifier string, content string, extra map[string]string, useIndex bool, options ...bool) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
@@ -195,6 +264,19 @@ func (mm *MindMapManager) ModifyNode(identifier string, content string, extra ma
 
 	if node == nil {
 		return fmt.Errorf("node not found")
+	}
+
+	// Default addToHistory to true
+	addToHistory := true
+	// If an option is provided, use it
+	if len(options) > 0 {
+		addToHistory = options[0]
+	}
+
+	oldContent := node.Content
+	oldExtra := make(map[string]string)
+	for k, v := range node.Extra {
+		oldExtra[k] = v
 	}
 
 	if content != "" {
@@ -213,10 +295,25 @@ func (mm *MindMapManager) ModifyNode(identifier string, content string, extra ma
 		return fmt.Errorf("failed to update node in storage: %v", err)
 	}
 
+	// Add to operation history
+	if addToHistory {
+		op := Operation{
+			Type: OpModify,
+			AffectedNode: NodeInfo{
+				Index: node.Index,
+			},
+			OldContent: oldContent,
+			NewContent: content,
+			OldExtra:   oldExtra,
+			NewExtra:   extra,
+		}
+		mm.addToHistory(op)
+	}
+
 	return nil
 }
 
-func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, useIndex bool) error {
+func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, useIndex bool, options ...bool) error {
 	if err := mm.ensureCurrentMindMap(); err != nil {
 		return err
 	}
@@ -240,6 +337,15 @@ func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, us
 		return fmt.Errorf("old parent node not found")
 	}
 
+	// Default addToHistory to true
+	addToHistory := true
+	// If an option is provided, use it
+	if len(options) > 0 {
+		addToHistory = options[0]
+	}
+
+	oldParentID := sourceNode.ParentID
+
 	// Remove from old parent
 	for i, child := range oldParentNode.Children {
 		if child == sourceNode {
@@ -258,9 +364,22 @@ func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, us
 	}
 
 	// Update logical indexes starting from the root
-	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.recalculateLogicalIndices(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after move: %v", err)
+	}
+
+	// Add to operation history
+	if addToHistory {
+		op := Operation{
+			Type: OpMove,
+			AffectedNode: NodeInfo{
+				Index: sourceNode.Index,
+			},
+			OldParentID: oldParentID,
+			NewParentID: targetNode.Index,
+		}
+		mm.addToHistory(op)
 	}
 
 	return nil
@@ -288,6 +407,8 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 	if targetNode == mm.CurrentMindMap.Root {
 		return fmt.Errorf("cannot insert before root node")
 	}
+
+	oldParentID := sourceNode.ParentID
 
 	// Find the parent of the target node
 	targetParent := mm.CurrentMindMap.Nodes[targetNode.ParentID]
@@ -324,10 +445,21 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 	}
 
 	// Update logical indexes starting from the root
-	err = mm.updateLogicalIndexes(mm.CurrentMindMap.Root)
+	err = mm.recalculateLogicalIndices(mm.CurrentMindMap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after insertion: %v", err)
 	}
+
+	// Add to operation history
+	op := Operation{
+		Type: OpInsert,
+		AffectedNode: NodeInfo{
+			Index: sourceNode.Index,
+		},
+		OldParentID: oldParentID,
+		NewParentID: targetNode.ParentID,
+	}
+	mm.addToHistory(op)
 
 	return nil
 }
@@ -360,7 +492,10 @@ func (mm *MindMapManager) Sort(identifier string, field string, reverse bool, us
 	fmt.Printf("Sorting children of node: %s (LogicalIndex: %s)\n", node.Content, node.LogicalIndex)
 
 	mm.sortNodeChildrenRecursively(node, field, reverse)
-	mm.assignLogicalIndexForSubtree(node)
+	err = mm.recalculateLogicalIndices(node)
+	if err != nil {
+		return fmt.Errorf("failed to recalculate logical indices after sorting: %v", err)
+	}
 
 	// Update the database to reflect the new order
 	err = mm.updateNodeOrderInDB(mm.CurrentMindMap.Root.Content, node)
@@ -369,26 +504,6 @@ func (mm *MindMapManager) Sort(identifier string, field string, reverse bool, us
 	}
 
 	return nil
-}
-
-func (mm *MindMapManager) assignLogicalIndexForSubtree(node *models.Node) {
-	var assign func(*models.Node, string)
-	assign = func(n *models.Node, prefix string) {
-		for i, child := range n.Children {
-			if n == mm.CurrentMindMap.Root {
-				child.LogicalIndex = fmt.Sprintf("%d", i+1)
-			} else {
-				child.LogicalIndex = fmt.Sprintf("%s.%d", prefix, i+1)
-			}
-			assign(child, child.LogicalIndex)
-		}
-	}
-
-	if node == mm.CurrentMindMap.Root {
-		assign(node, "")
-	} else {
-		assign(node, node.LogicalIndex)
-	}
 }
 
 func (mm *MindMapManager) sortNodeChildrenRecursively(node *models.Node, field string, reverse bool) {

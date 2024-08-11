@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/chzyer/readline"
@@ -10,16 +11,20 @@ import (
 )
 
 type CLI struct {
-	MindMap *mindmap.MindMapManager
-	RL      *readline.Instance
-	Prompt  string
+	MindMap      *mindmap.MindMapManager
+	RL           *readline.Instance
+	Prompt       string
+	History      []string
+	HistoryIndex int
 }
 
 func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
 	return &CLI{
-		MindMap: mm,
-		RL:      rl,
-		Prompt:  "> ",
+		MindMap:      mm,
+		RL:           rl,
+		Prompt:       "> ",
+		History:      []string{},
+		HistoryIndex: -1,
 	}
 }
 
@@ -48,7 +53,18 @@ func (c *CLI) Run() error {
 	}
 
 	args := c.ParseArgs(line)
-	return c.ExecuteCommand(args)
+	err = c.ExecuteCommand(args)
+	if err == nil {
+		// Only add successful commands to the history
+		c.History = append(c.History, line)
+		c.HistoryIndex = len(c.History) - 1
+
+		// Write to history file
+		if err := c.appendToHistoryFile(line); err != nil {
+			fmt.Printf("Failed to write to history file: %v\n", err)
+		}
+	}
+	return err
 }
 
 func (c *CLI) ParseArgs(input string) []string {
@@ -79,6 +95,16 @@ func (c *CLI) ParseArgs(input string) []string {
 	}
 
 	return args
+}
+
+func (c *CLI) appendToHistoryFile(line string) error {
+	f, err := os.OpenFile(c.RL.Config.HistoryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(line + "\n")
+	return err
 }
 
 func (c *CLI) ExecuteCommand(args []string) error {
@@ -121,6 +147,10 @@ func (c *CLI) ExecuteCommand(args []string) error {
 		return c.handleSort(args[1:])
 	case "find":
 		return c.handleFind(args[1:])
+	case "undo":
+		return c.handleUndo(args[1:])
+	case "redo":
+		return c.handleRedo(args[1:])
 	case "help":
 		return c.handleHelp(args[1:])
 	case "exit", "quit":

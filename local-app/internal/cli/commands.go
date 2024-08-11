@@ -365,7 +365,7 @@ func (c *CLI) handleLoad(args []string) error {
 	if isCurrentMindmap {
 		c.MindMap.CurrentMindMap = nil
 		c.Prompt = "> "
-		fmt.Printf("Switched out of mindmap '%s' before reloading\n", mindmapName)
+		fmt.Printf("Switched out of mindmap '%s' before reloading.\n", mindmapName)
 	}
 
 	if exists {
@@ -467,6 +467,34 @@ func (c *CLI) printNode(node *models.Node, showIndex bool) {
 	}
 
 	fmt.Println() // End the line
+}
+
+func (c *CLI) handleUndo(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: undo")
+	}
+
+	err := c.MindMap.Undo()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Undo successful")
+	return nil
+}
+
+func (c *CLI) handleRedo(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: redo")
+	}
+
+	err := c.MindMap.Redo()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Redo successful")
+	return nil
 }
 
 func (c *CLI) handleHelp(args []string) error {

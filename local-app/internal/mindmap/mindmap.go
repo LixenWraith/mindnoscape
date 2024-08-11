@@ -22,13 +22,44 @@ type MindMapManager struct {
 	Store          storage.Store
 	MindMaps       map[string]*MindMap
 	CurrentMindMap *MindMap
+	history        []Operation
+	historyIndex   int
 	// mutex          sync.RWMutex
+}
+
+type OperationType string
+
+const (
+	OpAdd    OperationType = "Add"
+	OpDelete OperationType = "Delete"
+	OpMove   OperationType = "Move"
+	OpInsert OperationType = "Insert"
+	OpModify OperationType = "Modify"
+)
+
+type NodeInfo struct {
+	Index    int
+	ParentID int
+}
+
+type Operation struct {
+	Type         OperationType
+	AffectedNode NodeInfo
+	OldParentID  int               // Used for Move and Insert
+	NewParentID  int               // Used for Move and Insert
+	OldContent   string            // Used for Modify
+	NewContent   string            // Used for Modify and Add
+	OldExtra     map[string]string // Used for Modify
+	NewExtra     map[string]string // Used for Modify and Add
+	DeletedTree  []*models.Node    // Used for Delete to store the entire deleted subtree
 }
 
 func NewMindMapManager(store storage.Store) (*MindMapManager, error) {
 	mm := &MindMapManager{
-		Store:    store,
-		MindMaps: make(map[string]*MindMap),
+		Store:        store,
+		MindMaps:     make(map[string]*MindMap),
+		history:      []Operation{},
+		historyIndex: -1,
 	}
 
 	// Load existing mindmaps from storage
@@ -154,6 +185,8 @@ func (mm *MindMapManager) loadNodesForMindMap(name string) error {
 		return fmt.Errorf("failed to build tree structure: %v", err)
 	}
 
+	mm.ClearOperationHistory()
+
 	return nil
 }
 
@@ -191,6 +224,8 @@ func (mm *MindMapManager) LoadNodes(mindmapName string) error {
 
 	// Update the MindMaps map with the new mindmap
 	mm.MindMaps[mindmapName] = newMindMap
+
+	mm.ClearOperationHistory()
 
 	return nil
 }
@@ -356,4 +391,158 @@ func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast boo
 	}
 
 	return nil
+}
+
+func (mm *MindMapManager) Undo() error {
+	mm.printOperationHistory()
+
+	if mm.historyIndex < 0 {
+		return fmt.Errorf("nothing to undo")
+	}
+
+	op := mm.history[mm.historyIndex]
+	fmt.Printf("Debug: Undoing operation type: %s\n", op.Type)
+
+	var err error
+	switch op.Type {
+	case OpAdd:
+		fmt.Printf("Debug: Undoing Add operation. Index: %d\n", op.AffectedNode.Index)
+		err = mm.DeleteNode(strconv.Itoa(op.AffectedNode.Index), true, false)
+	case OpDelete:
+		fmt.Printf("Debug: Undoing Delete operation. Index: %d, Content: %s\n", op.AffectedNode.Index, op.OldContent)
+		fmt.Printf("Debug: Undoing Delete operation. Index: %d, Content: %s\n", op.AffectedNode.Index, op.OldContent)
+		err = mm.restoreSubtree(op.DeletedTree, false)
+		if err != nil {
+			break
+		}
+		// Recalculate logical indexes after restoring the subtree
+		err = mm.recalculateLogicalIndices(mm.CurrentMindMap.Root)
+	case OpMove, OpInsert:
+		err = mm.MoveNode(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.OldParentID), true, false)
+	case OpModify:
+		err = mm.ModifyNode(strconv.Itoa(op.AffectedNode.Index), op.OldContent, op.OldExtra, true, false)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to undo %s: %v", op.Type, err)
+	}
+
+	mm.historyIndex--
+	mm.printOperationHistory()
+	return nil
+}
+
+func (mm *MindMapManager) Redo() error {
+	mm.printOperationHistory()
+
+	if mm.historyIndex >= len(mm.history)-1 {
+		return fmt.Errorf("nothing to redo")
+	}
+
+	op := mm.history[mm.historyIndex+1]
+	fmt.Printf("Debug: Redoing operation type: %s\n", op.Type)
+
+	var err error
+	switch op.Type {
+	case OpAdd:
+		fmt.Printf("Debug: Redoing Add operation. ParentID: %d, Content: %s\n", op.AffectedNode.ParentID, op.NewContent)
+		err = mm.AddNode(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true, op.AffectedNode.Index, false)
+	case OpDelete:
+		fmt.Printf("Debug: Redoing Delete operation. Index: %d\n", op.AffectedNode.Index)
+		err = mm.DeleteNode(strconv.Itoa(op.AffectedNode.Index), true, false)
+	case OpMove, OpInsert:
+		err = mm.MoveNode(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.NewParentID), true, false)
+	case OpModify:
+		err = mm.ModifyNode(strconv.Itoa(op.AffectedNode.Index), op.NewContent, op.NewExtra, true, false)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to redo %s: %v", op.Type, err)
+	}
+
+	mm.historyIndex++
+	mm.printOperationHistory()
+	return nil
+}
+
+func (mm *MindMapManager) restoreSubtree(nodes []*models.Node, addToHistory bool) error {
+	for _, node := range nodes {
+		// Only add the node if it doesn't already exist
+		if existingNode := mm.CurrentMindMap.Nodes[node.Index]; existingNode == nil {
+			err := mm.AddNode(strconv.Itoa(node.ParentID), node.Content, node.Extra, true, node.Index, addToHistory)
+			if err != nil {
+				return fmt.Errorf("failed to restore node %d: %v", node.Index, err)
+			}
+
+			// Restore children recursively
+			if len(node.Children) > 0 {
+				err = mm.restoreSubtree(node.Children, addToHistory)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (mm *MindMapManager) addToHistory(op Operation) {
+	// Check if we're adding a new operation (not from undo/redo)
+	if mm.historyIndex == len(mm.history)-1 {
+		// Remove any forward history
+		mm.history = mm.history[:mm.historyIndex+1]
+
+		// Append the new operation
+		mm.history = append(mm.history, op)
+		mm.historyIndex++
+	} else {
+		// We're in the middle of the history (after some undos)
+		// Clear everything after the current index and add the new operation
+		mm.history = append(mm.history[:mm.historyIndex+1], op)
+		mm.historyIndex++
+	}
+
+	// Print operation history after modifying it
+	mm.printOperationHistory()
+}
+
+func (mm *MindMapManager) ClearOperationHistory() {
+	mm.history = []Operation{}
+	mm.historyIndex = -1
+}
+
+func (mm *MindMapManager) printOperationHistory() {
+	fmt.Printf("Operation History (length: %d, current index: %d):\n", len(mm.history), mm.historyIndex)
+	for i, op := range mm.history {
+		fmt.Printf("[%d] Type: %s, AffectedNode: {Index: %d, ParentID: %d}, OldContent: %s, NewContent: %s\n",
+			i, op.Type, op.AffectedNode.Index, op.AffectedNode.ParentID, op.OldContent, op.NewContent)
+
+		if len(op.OldExtra) > 0 {
+			fmt.Printf("    OldExtra: %v\n", op.OldExtra)
+		}
+		if len(op.NewExtra) > 0 {
+			fmt.Printf("    NewExtra: %v\n", op.NewExtra)
+		}
+
+		if op.Type == OpDelete && len(op.DeletedTree) > 0 {
+			fmt.Printf("    DeletedTree:\n")
+			mm.printDeletedSubtree(op.DeletedTree, "    ")
+		}
+
+		if op.Type == OpMove || op.Type == OpInsert {
+			fmt.Printf("    OldParentID: %d, NewParentID: %d\n", op.OldParentID, op.NewParentID)
+		}
+	}
+}
+
+func (mm *MindMapManager) printDeletedSubtree(nodes []*models.Node, indent string) {
+	for _, node := range nodes {
+		fmt.Printf("%s- Index: %d, Content: %s, LogicalIndex: %s\n", indent, node.Index, node.Content, node.LogicalIndex)
+		if len(node.Extra) > 0 {
+			fmt.Printf("%s  Extra: %v\n", indent, node.Extra)
+		}
+		if len(node.Children) > 0 {
+			mm.printDeletedSubtree(node.Children, indent+"  ")
+		}
+	}
 }
