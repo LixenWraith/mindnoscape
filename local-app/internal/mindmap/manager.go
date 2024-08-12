@@ -22,9 +22,9 @@ type MindMapManager struct {
 	Store          storage.Store
 	MindMaps       map[string]*MindMap
 	CurrentMindMap *MindMap
+	CurrentUser    string
 	history        []Operation
 	historyIndex   int
-	// mutex          sync.RWMutex
 }
 
 type OperationType string
@@ -54,27 +54,66 @@ type Operation struct {
 	DeletedTree  []*models.Node    // Used for Delete to store the entire deleted subtree
 }
 
-func NewMindMapManager(store storage.Store) (*MindMapManager, error) {
+func (mm *MindMapManager) ChangeUser(username string) error {
+	// Load mindmaps for the new user
+	mindmaps, err := mm.Store.GetAllMindMaps(username)
+	if err != nil {
+		return fmt.Errorf("failed to load mindmaps for user %s: %v", username, err)
+	}
+
+	// Update MindMaps map
+	for _, mindmap := range mindmaps {
+		if _, exists := mm.MindMaps[mindmap.Name]; !exists {
+			mm.MindMaps[mindmap.Name] = &MindMap{
+				Nodes: make(map[int]*models.Node),
+			}
+		}
+	}
+
+	// Remove any mindmaps not in the new user's list
+	for name := range mm.MindMaps {
+		found := false
+		for _, mindmap := range mindmaps {
+			if mindmap.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			delete(mm.MindMaps, name)
+		}
+	}
+
+	mm.CurrentMindMap = nil
+	mm.CurrentUser = username
+	mm.ClearOperationHistory()
+
+	fmt.Printf("Changed to user %s, loaded %d mindmaps\n", username, len(mm.MindMaps))
+	return nil
+}
+
+func NewMindMapManager(store storage.Store, username string) (*MindMapManager, error) {
 	mm := &MindMapManager{
 		Store:        store,
 		MindMaps:     make(map[string]*MindMap),
+		CurrentUser:  username,
 		history:      []Operation{},
 		historyIndex: -1,
 	}
 
-	// Load existing mindmaps from storage
-	mindmaps, err := store.GetAllMindMaps()
+	// Load existing mindmaps for the user
+	mindmaps, err := store.GetAllMindMaps(username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load mindmaps: %v", err)
 	}
 
-	for _, mindmapName := range mindmaps {
-		mm.MindMaps[mindmapName] = &MindMap{
+	for _, mindmap := range mindmaps {
+		mm.MindMaps[mindmap.Name] = &MindMap{
 			Nodes: make(map[int]*models.Node),
 		}
 	}
 
-	fmt.Printf("Loaded %d mindmaps\n", len(mm.MindMaps))
+	fmt.Printf("Loaded %d mindmaps for user %s\n", len(mm.MindMaps), username)
 
 	return mm, nil
 }
@@ -84,62 +123,88 @@ func (mm *MindMapManager) mindMapExists(name string) bool {
 	return exists
 }
 
-func (mm *MindMapManager) CreateNewMindMap(name string) error {
-	// mm.mutex.Lock()
-	// defer mm.mutex.Unlock()
+func (mm *MindMapManager) ListMindMaps() ([]storage.MindMapInfo, error) {
+	allMindmaps, err := mm.Store.GetAllMindMaps(mm.CurrentUser)
+	if err != nil {
+		return nil, err
+	}
 
+	var existingMindmaps []storage.MindMapInfo
+	for _, mindmap := range allMindmaps {
+		if _, exists := mm.MindMaps[mindmap.Name]; exists {
+			existingMindmaps = append(existingMindmaps, mindmap)
+		}
+	}
+
+	return existingMindmaps, nil
+}
+
+func (mm *MindMapManager) CreateNewMindMap(name string, isPublic bool) error {
 	if mm.mindMapExists(name) {
 		return fmt.Errorf("mindmap '%s' already exists", name)
+	}
+
+	// Add to storage and get the new MindmapID
+	mindmapID, err := mm.Store.AddMindMap(name, mm.CurrentUser, isPublic)
+	if err != nil {
+		return fmt.Errorf("failed to add mindmap to storage: %v", err)
 	}
 
 	newMindMap := &MindMap{
 		Nodes: make(map[int]*models.Node),
 	}
 
-	// Create root node
-	root := models.NewNode(0, name)
+	// Create root node with the correct MindmapID
+	root := models.NewNode(0, name, mindmapID)
 	root.ParentID = -1
 	root.LogicalIndex = "0"
 	newMindMap.Root = root
 	newMindMap.Nodes[0] = root
 
-	// Add to storage
-	if err := mm.Store.AddMindMap(name); err != nil {
-		return fmt.Errorf("failed to add mindmap to storage: %v", err)
-	}
-
-	if err := mm.Store.AddNode(name, -1, root.Content, root.Extra, root.LogicalIndex); err != nil {
+	if err := mm.Store.AddNode(name, mm.CurrentUser, -1, root.Content, root.Extra, root.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to add root node: %v", err)
 	}
 
 	mm.MindMaps[name] = newMindMap
 	mm.CurrentMindMap = newMindMap
 
-	fmt.Printf("Created new mindmap '%s'\n", name)
+	fmt.Printf("Created new mindmap '%s' (ID: %d) for user %s\n", name, mindmapID, mm.CurrentUser)
 	return nil
 }
 
+func (mm *MindMapManager) RemoveMindMap(name string) {
+	delete(mm.MindMaps, name)
+}
+
 func (mm *MindMapManager) SwitchMindMap(name string) error {
+	fmt.Printf("Debug: Attempting to switch to mindmap '%s'\n", name)
 	if !mm.mindMapExists(name) {
 		return fmt.Errorf("mindmap '%s' does not exist", name)
 	}
 
-	mm.CurrentMindMap = mm.MindMaps[name]
-
-	// Debug: Print raw DB structure
-	if err := mm.Store.DebugPrintDBStructure(name); err != nil {
-		fmt.Printf("Error printing DB structure: %v\n", err)
+	// Check if the user has permission to access this mindmap
+	hasPermission, err := mm.Store.HasMindMapPermission(name, mm.CurrentUser)
+	if err != nil {
+		return fmt.Errorf("failed to check mindmap permissions: %v", err)
 	}
+	if !hasPermission {
+		return fmt.Errorf("user %s does not have permission to access mindmap '%s'", mm.CurrentUser, name)
+	}
+	fmt.Printf("Debug: User '%s' has permission to access mindmap '%s'\n", mm.CurrentUser, name)
 
 	// Load nodes for the switched mindmap
 	if err := mm.loadNodesForMindMap(name); err != nil {
 		return fmt.Errorf("failed to load nodes for mindmap '%s': %v", name, err)
 	}
 
+	mm.CurrentMindMap = mm.MindMaps[name]
+	fmt.Printf("Debug: Switched to mindmap '%s'\n", name)
+
 	return nil
 }
 
 func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.Node) error {
+	fmt.Printf("Debug: Building tree from %d nodes\n", len(nodes))
 	for _, node := range nodes {
 		mindmap.Nodes[node.Index] = node
 		if node.Index > mindmap.MaxIndex {
@@ -149,6 +214,7 @@ func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.N
 
 		if node.ParentID == -1 {
 			mindmap.Root = node
+			fmt.Printf("Debug: Set root node - Index: %d, Content: %s\n", node.Index, node.Content)
 		}
 	}
 
@@ -164,6 +230,7 @@ func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.N
 				return fmt.Errorf("parent node %d not found for node %d", node.ParentID, node.Index)
 			}
 			parent.Children = append(parent.Children, node)
+			fmt.Printf("Debug: Added node %d to parent %d\n", node.Index, parent.Index)
 		}
 	}
 
@@ -171,20 +238,22 @@ func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.N
 }
 
 func (mm *MindMapManager) loadNodesForMindMap(name string) error {
-	nodes, err := mm.Store.GetAllNodesForMindMap(name)
+	nodes, err := mm.Store.GetAllNodesForMindMap(name, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve nodes for mindmap '%s': %v", name, err)
 	}
 
-	mindmap := mm.MindMaps[name]
-	mindmap.Nodes = make(map[int]*models.Node)
-	mindmap.MaxIndex = 0
+	mindmap := &MindMap{
+		Nodes:    make(map[int]*models.Node),
+		MaxIndex: 0,
+	}
 
 	err = mm.buildTreeFromNodes(mindmap, nodes)
 	if err != nil {
 		return fmt.Errorf("failed to build tree structure: %v", err)
 	}
 
+	mm.MindMaps[name] = mindmap
 	mm.ClearOperationHistory()
 
 	return nil
@@ -195,7 +264,7 @@ func (mm *MindMapManager) LoadNodes(mindmapName string) error {
 		return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
 	}
 
-	nodes, err := mm.Store.GetAllNodesForMindMap(mindmapName)
+	nodes, err := mm.Store.GetAllNodesForMindMap(mindmapName, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve nodes: %v", err)
 	}
@@ -238,7 +307,7 @@ func (mm *MindMapManager) validateAndUpdateLogicalIndices(node *models.Node, par
 				child.Index, child.LogicalIndex, expectedIndex)
 			child.LogicalIndex = expectedIndex
 			// Update the database with the corrected logical index
-			err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, child.Index, child.LogicalIndex)
+			err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, mm.CurrentUser, child.Index, child.LogicalIndex)
 			if err != nil {
 				fmt.Printf("Error updating logical index in database: %v\n", err)
 			}
@@ -261,8 +330,8 @@ func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
 }
 
 func (mm *MindMapManager) findNodeByLogicalIndex(logicalIndex string) (*models.Node, error) {
-	if mm.CurrentMindMap == nil {
-		return nil, fmt.Errorf("no current mindmap selected")
+	if err := mm.ensureCurrentMindMap(); err != nil {
+		return nil, err
 	}
 
 	if logicalIndex == "0" {
@@ -287,9 +356,8 @@ func (mm *MindMapManager) findNodeByLogicalIndex(logicalIndex string) (*models.N
 }
 
 func (mm *MindMapManager) Show(logicalIndex string, showIndex bool) error {
-	if mm.CurrentMindMap == nil {
-
-		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
+	if err := mm.ensureCurrentMindMap(); err != nil {
+		return err
 	}
 
 	if mm.CurrentMindMap.Root == nil {

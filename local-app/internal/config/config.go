@@ -10,7 +10,6 @@ import (
 type Config struct {
 	DatabasePath string `json:"database_path"`
 	HistoryFile  string `json:"history_file"`
-	// Add more configuration fields as needed
 }
 
 var (

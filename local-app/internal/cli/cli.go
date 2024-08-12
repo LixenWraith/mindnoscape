@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +18,7 @@ type CLI struct {
 	Prompt       string
 	History      []string
 	HistoryIndex int
+	CurrentUser  string
 }
 
 func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
@@ -25,21 +28,53 @@ func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
 		Prompt:       "> ",
 		History:      []string{},
 		HistoryIndex: -1,
+		CurrentUser:  "guest",
 	}
 }
 
-func (c *CLI) updatePrompt() {
+func (c *CLI) UpdatePrompt() {
 	if c.MindMap.CurrentMindMap != nil {
-		c.Prompt = fmt.Sprintf("%s > ", c.MindMap.CurrentMindMap.Root.Content)
+		c.Prompt = fmt.Sprintf("%s@%s > ", c.CurrentUser, c.MindMap.CurrentMindMap.Root.Content)
 	} else {
-		c.Prompt = "> "
+		c.Prompt = fmt.Sprintf("%s > ", c.CurrentUser)
 	}
 	c.RL.SetPrompt(c.Prompt)
 }
 
+func (c *CLI) ExecuteScript(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return fmt.Errorf("failed to open script file: %v", err)
+	}
+	defer func() {
+		closeErr := f.Close()
+		if closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		command := scanner.Text()
+		fmt.Print(c.Prompt + command + "\n")
+		args := c.ParseArgs(command)
+		err := c.ExecuteCommand(args)
+		if err != nil {
+			fmt.Printf("Error executing command '%s': %v\n", command, err)
+		}
+		c.UpdatePrompt()
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading script file: %v", err)
+	}
+
+	return nil
+}
+
 func (c *CLI) Run() error {
 	line, err := c.RL.Readline()
-	if err == readline.ErrInterrupt {
+	if errors.Is(err, readline.ErrInterrupt) {
 		return fmt.Errorf("operation interrupted by user")
 	} else if err == io.EOF {
 		return fmt.Errorf("end of input reached")
@@ -64,6 +99,10 @@ func (c *CLI) Run() error {
 			fmt.Printf("Failed to write to history file: %v\n", err)
 		}
 	}
+
+	// Update the prompt after each command
+	c.UpdatePrompt()
+
 	return err
 }
 
@@ -102,7 +141,12 @@ func (c *CLI) appendToHistoryFile(line string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		closeErr := f.Close()
+		if closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	_, err = f.WriteString(line + "\n")
 	return err
 }
@@ -113,6 +157,10 @@ func (c *CLI) ExecuteCommand(args []string) error {
 	}
 
 	switch args[0] {
+	case "user":
+		return c.handleUser(args[1:])
+	case "access":
+		return c.handleAccess(args[1:])
 	case "new":
 		return c.handleNew(args[1:])
 	case "switch":
@@ -178,6 +226,34 @@ func (c *CLI) printHelp(command string) {
 
 // commandHelp contains help text for each command.
 var commandHelp = map[string]string{
+	"user": `Syntax: user [--new/--mod][<username> [password]]
+Description: Manages user accounts and authentication.
+- If no argument is given: Displays the current username.
+- If one argument is given: Prompts for password and switches to the provided user.
+- If two arguments are given: Switches to the provided user with the given password.
+- Option --new: Creates a new user account.
+  - If no additional arguments, prompts for new username and password.
+  - If one additional argument, uses it as the username and prompts for password.
+  - If two additional arguments, uses them as username and password.
+- Option --mod: Modifies an existing user account.
+  - If currently logged in, modifies the current user.
+  - Otherwise, prompts for the user to modify.
+  - Prompts for current password, new username (optional), and new password (optional).
+Examples:
+  user
+  user alice
+  user bob password123
+  user --new
+  user --new charlie
+  user --new david password456
+  user --mod`,
+
+	"access": `Syntax: access <mindmap name> <public|private>
+Description: Sets the access level and visibility of a mindmap to public or private.
+- <mindmap name>: The name of the mindmap to modify.
+- <public|private>: The new access level and visibility setting for the mindmap.
+Example: access "My Project" public`,
+
 	"new": `Syntax: new <mindmap name>
 Description: Creates a new mindmap with the specified name as its root node.
 Example: new "My Project"`,

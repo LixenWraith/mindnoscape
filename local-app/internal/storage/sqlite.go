@@ -4,24 +4,39 @@ import (
 	"database/sql"
 	"fmt"
 	"mindnoscape/local-app/internal/models"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type SQLiteStore struct {
-	db            *sql.DB
-	mindmapTables map[string]string // Maps mindmap names to table names
+	db *sql.DB
 }
 
 func (s *SQLiteStore) initSchema() error {
 	_, err := s.db.Exec(`
-        CREATE TABLE IF NOT EXISTS mindmaps (
-            name TEXT PRIMARY KEY
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS mindmaps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            is_public BOOLEAN NOT NULL DEFAULT 0,
+            FOREIGN KEY (owner) REFERENCES users(username),
+            UNIQUE (name, owner)
+        );
+
         CREATE TABLE IF NOT EXISTS nodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mindmap_id INTEGER NOT NULL,
             parent_id INTEGER,
             content TEXT,
-            logical_index TEXT
+            logical_index TEXT,
+            FOREIGN KEY (mindmap_id) REFERENCES mindmaps(id)
         );
+
         CREATE TABLE IF NOT EXISTS node_attributes (
             node_id INTEGER,
             key TEXT,
@@ -34,180 +49,70 @@ func (s *SQLiteStore) initSchema() error {
 
 func NewSQLiteStore(db *sql.DB) (Store, error) {
 	store := &SQLiteStore{
-		db:            db,
-		mindmapTables: make(map[string]string),
+		db: db,
 	}
 	if err := store.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize schema: %v", err)
 	}
-	if err := store.loadExistingMindmaps(); err != nil {
-		return nil, fmt.Errorf("failed to load existing mindmaps: %v", err)
-	}
 	return store, nil
 }
 
-func (s *SQLiteStore) getTableName(mindmapName string) (string, error) {
-	tableName, ok := s.mindmapTables[mindmapName]
-	if !ok {
-		return "", fmt.Errorf("mindmap '%s' does not exist", mindmapName)
-	}
-	return tableName, nil
-}
+// User-related methods
 
-func (s *SQLiteStore) loadExistingMindmaps() error {
-	rows, err := s.db.Query("SELECT name FROM mindmaps")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		s.mindmapTables[name] = fmt.Sprintf("mindmap_%s", name)
-	}
-
-	return nil
-}
-
-func (s *SQLiteStore) AddMindMap(name string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Insert into mindmaps table
-	_, err = tx.Exec("INSERT INTO mindmaps (name) VALUES (?)", name)
-	if err != nil {
-		return err
-	}
-
-	// Create new table for this mindmap
-	tableName := fmt.Sprintf("mindmap_%s", name)
-	_, err = tx.Exec(fmt.Sprintf(`
-        CREATE TABLE %s (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            parent_id INTEGER,
-            content TEXT,
-            logical_index TEXT
-        )
-    `, tableName))
-	if err != nil {
-		return err
-	}
-
-	// Create table for node attributes
-	_, err = tx.Exec(fmt.Sprintf(`
-        CREATE TABLE %s_attributes (
-            node_id INTEGER,
-            key TEXT,
-            value TEXT,
-            FOREIGN KEY (node_id) REFERENCES %s(id)
-        )
-    `, tableName, tableName))
-	if err != nil {
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
-	s.mindmapTables[name] = tableName
-	return nil
-}
-
-func (s *SQLiteStore) GetAllMindMaps() ([]string, error) {
-	rows, err := s.db.Query("SELECT name FROM mindmaps")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var mindmaps []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		mindmaps = append(mindmaps, name)
-	}
-	return mindmaps, nil
-}
-
-func (s *SQLiteStore) MindMapExists(name string) (bool, error) {
+func (s *SQLiteStore) UserExists(username string) (bool, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ?", name).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count)
 	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
-func (s *SQLiteStore) DebugPrintDBStructure(mindmapName string) error {
-	tableName, err := s.getTableName(mindmapName)
+func (s *SQLiteStore) CreateUser(username, password string) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
-	rows, err := s.db.Query(fmt.Sprintf(`
-        SELECT id, parent_id, content, logical_index 
-        FROM %s 
-        ORDER BY id
-    `, tableName))
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	fmt.Println("Raw Database Structure:")
-	fmt.Println("ID | ParentID | LogicalIndex | Content")
-	fmt.Println("-------------------------------------------")
-	for rows.Next() {
-		var id, parentID int
-		var content, logicalIndex string
-		if err := rows.Scan(&id, &parentID, &content, &logicalIndex); err != nil {
-			return err
-		}
-		fmt.Printf("%2d | %8d | %12s | %s\n", id, parentID, logicalIndex, content)
-	}
-	fmt.Println("-------------------------------------------")
-	return nil
+	_, err = s.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, hashedPassword)
+	return err
 }
 
-func (s *SQLiteStore) AddNode(mindmapName string, parentID int, content string, extra map[string]string, logicalIndex string) error {
-	tableName, err := s.getTableName(mindmapName)
+func (s *SQLiteStore) GetUser(username string) (*models.User, error) {
+	var user models.User
+	var passwordHash string
+	err := s.db.QueryRow("SELECT username, password_hash FROM users WHERE username = ?", username).Scan(&user.Username, &passwordHash)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	user.PasswordHash = []byte(passwordHash)
+	return &user, nil
+}
 
+func (s *SQLiteStore) UpdateUser(oldUsername, newUsername, newPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	var result sql.Result
-	if parentID == -1 {
-		// This is the root node
-		result, err = tx.Exec(fmt.Sprintf("INSERT INTO %s (id, parent_id, content, logical_index) VALUES (0, -1, ?, '0')", tableName), content)
-	} else {
-		result, err = tx.Exec(fmt.Sprintf("INSERT INTO %s (parent_id, content, logical_index) VALUES (?, ?, ?)", tableName), parentID, content, logicalIndex)
-	}
-	if err != nil {
-		return err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return err
+	if newUsername != "" && newUsername != oldUsername {
+		_, err = tx.Exec("UPDATE users SET username = ? WHERE username = ?", newUsername, oldUsername)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec("UPDATE mindmaps SET owner = ? WHERE owner = ?", newUsername, oldUsername)
+		if err != nil {
+			return err
+		}
 	}
 
-	for key, value := range extra {
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO %s_attributes (node_id, key, value) VALUES (?, ?, ?)", tableName), id, key, value)
+	if newPassword != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec("UPDATE users SET password_hash = ? WHERE username = ?", hashedPassword, oldUsername)
 		if err != nil {
 			return err
 		}
@@ -216,56 +121,133 @@ func (s *SQLiteStore) AddNode(mindmapName string, parentID int, content string, 
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string) ([]*models.Node, error) {
-	tableName, err := s.getTableName(mindmapName)
-	if err != nil {
-		return nil, err
+func (s *SQLiteStore) AuthenticateUser(username, password string) (bool, error) {
+	if username == "guest" {
+		return true, nil // Guest user is always authenticated
 	}
 
-	rows, err := s.db.Query(fmt.Sprintf(`
-        SELECT id, parent_id, content, logical_index 
-        FROM %s 
-        ORDER BY CASE WHEN id = 0 THEN 0 ELSE 1 END, logical_index
-    `, tableName))
+	var passwordHash string
+	err := s.db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&passwordHash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	return err == nil, nil
+}
+
+// Mindmap-related methods
+
+func (s *SQLiteStore) AddMindMap(name string, owner string, isPublic bool) (int, error) {
+	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", name, owner, isPublic)
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return int(id), nil
+}
+
+func (s *SQLiteStore) GetAllMindMaps(username string) ([]MindMapInfo, error) {
+	rows, err := s.db.Query(`
+        SELECT name, is_public, owner
+        FROM mindmaps
+        WHERE owner = ? OR is_public = 1
+        ORDER BY name
+    `, username)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	nodes := make([]*models.Node, 0)
+	var mindmaps []MindMapInfo
 	for rows.Next() {
-		node := &models.Node{Extra: make(map[string]string), Children: []*models.Node{}}
-		if err := rows.Scan(&node.Index, &node.ParentID, &node.Content, &node.LogicalIndex); err != nil {
+		var mm MindMapInfo
+		if err := rows.Scan(&mm.Name, &mm.IsPublic, &mm.Owner); err != nil {
 			return nil, err
 		}
-		nodes = append(nodes, node)
+		mindmaps = append(mindmaps, mm)
 	}
-
-	// Fetch extra attributes for all nodes
-	for _, node := range nodes {
-		attrRows, err := s.db.Query(fmt.Sprintf("SELECT key, value FROM %s_attributes WHERE node_id = ?", tableName), node.Index)
-		if err != nil {
-			return nil, err
-		}
-		for attrRows.Next() {
-			var key, value string
-			if err := attrRows.Scan(&key, &value); err != nil {
-				attrRows.Close()
-				return nil, err
-			}
-			node.Extra[key] = value
-		}
-		attrRows.Close()
-	}
-
-	return nodes, nil
+	return mindmaps, nil
 }
 
-func (s *SQLiteStore) GetNode(mindmapName string, id int) (*models.Node, error) {
+func (s *SQLiteStore) MindMapExists(name string, username string) (bool, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", name, username).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *SQLiteStore) UpdateMindMapAccess(name string, username string, isPublic bool) error {
+	_, err := s.db.Exec("UPDATE mindmaps SET is_public = ? WHERE name = ? AND owner = ?", isPublic, name, username)
+	return err
+}
+
+// Node-related methods
+
+func (s *SQLiteStore) AddNode(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// First, get the mindmap ID and check permissions
+	var mindmapID int
+	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&mindmapID)
+	if err != nil {
+		return err
+	}
+
+	var result sql.Result
+	if parentID == -1 {
+		// This is the root node, explicitly set its ID to 0
+		_, err = tx.Exec("INSERT INTO nodes (id, mindmap_id, parent_id, content, logical_index) VALUES (0, ?, ?, ?, ?)", mindmapID, nil, content, logicalIndex)
+	} else {
+		// For non-root nodes, let the database auto-increment the ID
+		result, err = tx.Exec("INSERT INTO nodes (mindmap_id, parent_id, content, logical_index) VALUES (?, ?, ?, ?)", mindmapID, parentID, content, logicalIndex)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	var nodeID int64
+	if parentID != -1 {
+		nodeID, err = result.LastInsertId()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Insert extra attributes
+	for key, value := range extra {
+		_, err = tx.Exec("INSERT INTO node_attributes (node_id, key, value) VALUES (?, ?, ?)", nodeID, key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) GetNode(mindmapName string, username string, id int) (*models.Node, error) {
 	node := &models.Node{Index: id}
 
 	var parentID sql.NullInt64
-	err := s.db.QueryRow("SELECT COALESCE(parent_id, -1), content, logical_index FROM nodes WHERE mindmap_name = ? AND id = ?", mindmapName, id).Scan(&parentID, &node.Content, &node.LogicalIndex)
+	err := s.db.QueryRow(`
+        SELECT COALESCE(n.parent_id, -1), n.content, n.logical_index 
+        FROM nodes n
+        JOIN mindmaps m ON n.mindmap_id = m.id
+        WHERE m.name = ? AND (m.owner = ? OR m.is_public = 1) AND n.id = ?`,
+		mindmapName, username, id).Scan(&parentID, &node.Content, &node.LogicalIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -294,35 +276,39 @@ func (s *SQLiteStore) GetNode(mindmapName string, id int) (*models.Node, error) 
 	return node, nil
 }
 
-func (s *SQLiteStore) GetParentNode(mindmapName string, id int) (*models.Node, error) {
-	var parentID int
-	err := s.db.QueryRow("SELECT parent_id FROM nodes WHERE mindmap_name = ? AND id = ?", mindmapName, id).Scan(&parentID)
+func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string) ([]*models.Node, error) {
+	// First, get the mindmap ID and check permissions
+	var mindmapID int
+	var owner string
+	var isPublic bool
+	err := s.db.QueryRow("SELECT id, owner, is_public FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&mindmapID, &owner, &isPublic)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get mindmap info: %v", err)
 	}
-	return s.GetNode(mindmapName, parentID)
-}
 
-func (s *SQLiteStore) GetAllNodes() ([]*models.Node, error) {
-	rows, err := s.db.Query("SELECT id, IFNULL(parent_id, -1) as parent_id, content, logical_index FROM nodes ORDER BY logical_index")
+	fmt.Printf("Debug: Mindmap '%s' - ID: %d, Owner: %s, IsPublic: %v\n", mindmapName, mindmapID, owner, isPublic)
+
+	// Then get all nodes for this mindmap
+	rows, err := s.db.Query(`
+        SELECT id, COALESCE(parent_id, -1) as parent_id, content, logical_index 
+        FROM nodes 
+        WHERE mindmap_id = ?
+        ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, logical_index
+    `, mindmapID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query nodes: %v", err)
 	}
 	defer rows.Close()
 
 	nodes := make([]*models.Node, 0)
 	for rows.Next() {
 		node := &models.Node{Extra: make(map[string]string), Children: []*models.Node{}}
-		var parentID int
-		if err := rows.Scan(&node.Index, &parentID, &node.Content, &node.LogicalIndex); err != nil {
-			return nil, err
+		if err := rows.Scan(&node.Index, &node.ParentID, &node.Content, &node.LogicalIndex); err != nil {
+			return nil, fmt.Errorf("failed to scan node: %v", err)
 		}
-		if parentID == -1 {
-			node.ParentID = 0 // Set to 0 for root node
-		} else {
-			node.ParentID = parentID
-		}
+		node.MindMapID = mindmapID
 		nodes = append(nodes, node)
+		fmt.Printf("Debug: Node - Index: %d, ParentID: %d, Content: %s, LogicalIndex: %s\n", node.Index, node.ParentID, node.Content, node.LogicalIndex)
 	}
 
 	// Fetch extra attributes for all nodes
@@ -345,30 +331,29 @@ func (s *SQLiteStore) GetAllNodes() ([]*models.Node, error) {
 	return nodes, nil
 }
 
-func (s *SQLiteStore) UpdateNode(mindmapName string, id int, content string, extra map[string]string, logicalIndex string) error {
-	tableName, err := s.getTableName(mindmapName)
-	if err != nil {
-		return err
-	}
-
+func (s *SQLiteStore) UpdateNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(fmt.Sprintf("UPDATE %s SET content = ?, logical_index = ? WHERE id = ?", tableName), content, logicalIndex, id)
+	_, err = tx.Exec(`
+        UPDATE nodes 
+        SET content = ?, logical_index = ? 
+        WHERE id = ? AND mindmap_id = (SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1))
+    `, content, logicalIndex, id, mindmapName, username)
 	if err != nil {
 		return err
 	}
 
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM %s_attributes WHERE node_id = ?", tableName), id)
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id = ?", id)
 	if err != nil {
 		return err
 	}
 
 	for key, value := range extra {
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO %s_attributes (node_id, key, value) VALUES (?, ?, ?)", tableName), id, key, value)
+		_, err = tx.Exec("INSERT INTO node_attributes (node_id, key, value) VALUES (?, ?, ?)", id, key, value)
 		if err != nil {
 			return err
 		}
@@ -377,60 +362,22 @@ func (s *SQLiteStore) UpdateNode(mindmapName string, id int, content string, ext
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) ClearAllNodes(mindmapName string) error {
-	tableName, err := s.getTableName(mindmapName)
-	if err != nil {
-		return err
-	}
-
+func (s *SQLiteStore) DeleteNode(mindmapName string, username string, id int) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Drop the mindmap table
-	_, err = tx.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName))
+	_, err = tx.Exec(`
+        DELETE FROM nodes 
+        WHERE id = ? AND mindmap_id = (SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1))
+    `, id, mindmapName, username)
 	if err != nil {
 		return err
 	}
 
-	// Drop the attributes table
-	_, err = tx.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s_attributes", tableName))
-	if err != nil {
-		return err
-	}
-
-	// Remove the mindmap from the mindmaps table
-	_, err = tx.Exec("DELETE FROM mindmaps WHERE name = ?", mindmapName)
-	if err != nil {
-		return err
-	}
-
-	// Remove the mindmap from the in-memory map
-	delete(s.mindmapTables, mindmapName)
-
-	return tx.Commit()
-}
-
-func (s *SQLiteStore) DeleteNode(mindmapName string, id int) error {
-	tableName, err := s.getTableName(mindmapName)
-	if err != nil {
-		return err
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE id = ?", tableName), id)
-	if err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM %s_attributes WHERE node_id = ?", tableName), id)
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id = ?", id)
 	if err != nil {
 		return err
 	}
@@ -438,42 +385,75 @@ func (s *SQLiteStore) DeleteNode(mindmapName string, id int) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) UpdateNodeOrder(mindmapName string, nodeID int, logicalIndex string) error {
-	tableName, err := s.getTableName(mindmapName)
+func (s *SQLiteStore) GetParentNode(mindmapName string, username string, id int) (*models.Node, error) {
+	var parentID int
+	err := s.db.QueryRow(`
+        SELECT parent_id 
+        FROM nodes n
+        JOIN mindmaps m ON n.mindmap_id = m.id
+        WHERE m.name = ? AND (m.owner = ? OR m.is_public = 1) AND n.id = ?`, mindmapName, username, id).Scan(&parentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return s.GetNode(mindmapName, username, parentID)
+}
 
+func (s *SQLiteStore) MoveNode(mindmapName string, username string, sourceID, targetID int) error {
+	_, err := s.db.Exec(`
+        UPDATE nodes 
+        SET parent_id = ? 
+        WHERE id = ? AND mindmap_id = (SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1))
+    `, targetID, sourceID, mindmapName, username)
+	return err
+}
+
+func (s *SQLiteStore) UpdateNodeOrder(mindmapName string, username string, nodeID int, logicalIndex string) error {
+	_, err := s.db.Exec(`
+        UPDATE nodes 
+        SET logical_index = ? 
+        WHERE id = ? AND mindmap_id = (SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1))
+    `, logicalIndex, nodeID, mindmapName, username)
+	return err
+}
+
+func (s *SQLiteStore) ClearAllNodes(mindmapName string, username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Exec(fmt.Sprintf("UPDATE %s SET logical_index = ? WHERE id = ?", tableName), logicalIndex, nodeID)
+	// Get the mindmap ID and check ownership
+	var mindmapID int
+	var owner string
+	err = tx.QueryRow("SELECT id, owner FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID, &owner)
 	if err != nil {
-		return err
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("mindmap '%s' does not exist or you don't have permission to clear it", mindmapName)
+		}
+		return fmt.Errorf("failed to get mindmap info: %v", err)
+	}
+
+	// Delete all nodes for this mindmap
+	_, err = tx.Exec("DELETE FROM nodes WHERE mindmap_id = ?", mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to delete nodes: %v", err)
+	}
+
+	// Delete all node attributes for this mindmap's nodes
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id IN (SELECT id FROM nodes WHERE mindmap_id = ?)", mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to delete node attributes: %v", err)
 	}
 
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) MoveNode(mindmapName string, sourceID, targetID int) error {
-	tableName, err := s.getTableName(mindmapName)
+func (s *SQLiteStore) HasMindMapPermission(mindmapName string, username string) (bool, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)
 	if err != nil {
-		return err
+		return false, err
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec(fmt.Sprintf("UPDATE %s SET parent_id = ? WHERE id = ?", tableName), targetID, sourceID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return count > 0, nil
 }

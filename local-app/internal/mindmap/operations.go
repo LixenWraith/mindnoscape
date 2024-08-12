@@ -8,18 +8,9 @@ import (
 	"strings"
 )
 
-func (mm *MindMapManager) ListMindMaps() []string {
-	var names []string
-	for name := range mm.MindMaps {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
 func (mm *MindMapManager) ensureCurrentMindMap() error {
 	if mm.CurrentMindMap == nil {
-		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
+		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap or 'new' to create a new one")
 	}
 	return nil
 }
@@ -79,7 +70,7 @@ func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra
 		mm.CurrentMindMap.MaxIndex = newIndex
 	}
 
-	newNode := models.NewNode(newIndex, content)
+	newNode := models.NewNode(mm.CurrentMindMap.MaxIndex+1, content, mm.CurrentMindMap.Root.MindMapID)
 	newNode.Extra = extra
 	newNode.ParentID = parentNode.Index
 
@@ -91,7 +82,7 @@ func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra
 	}
 
 	// Add to storage
-	if err := mm.Store.AddNode(mm.CurrentMindMap.Root.Content, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
+	if err := mm.Store.AddNode(mm.CurrentMindMap.Root.Content, mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to add node to storage: %v", err)
 	}
 
@@ -143,7 +134,7 @@ func (mm *MindMapManager) DeleteNode(identifier string, useIndex bool, options .
 	mm.getSubtreeNodes(node, &deletedTree)
 
 	// Remove from storage
-	if err := mm.Store.DeleteNode(mm.CurrentMindMap.Root.Content, node.Index); err != nil {
+	if err := mm.Store.DeleteNode(mm.CurrentMindMap.Root.Content, mm.CurrentUser, node.Index); err != nil {
 		return fmt.Errorf("failed to delete node from storage: %v", err)
 	}
 
@@ -206,7 +197,7 @@ func (mm *MindMapManager) recalculateLogicalIndices(node *models.Node) error {
 
 			if child.LogicalIndex != newLogicalIndex {
 				child.LogicalIndex = newLogicalIndex
-				err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, child.Index, child.LogicalIndex)
+				err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, mm.CurrentUser, child.Index, child.LogicalIndex)
 				if err != nil {
 					return fmt.Errorf("failed to update logical index for node %d: %v", child.Index, err)
 				}
@@ -235,7 +226,7 @@ func (mm *MindMapManager) Clear() error {
 	}
 
 	mindmapName := mm.CurrentMindMap.Root.Content
-	err := mm.Store.ClearAllNodes(mindmapName)
+	err := mm.Store.ClearAllNodes(mindmapName, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to clear nodes: %v", err)
 	}
@@ -291,7 +282,7 @@ func (mm *MindMapManager) ModifyNode(identifier string, content string, extra ma
 	}
 
 	// Update in storage
-	if err := mm.Store.UpdateNode(mm.CurrentMindMap.Root.Content, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
+	if err := mm.Store.UpdateNode(mm.CurrentMindMap.Root.Content, mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to update node in storage: %v", err)
 	}
 
@@ -359,7 +350,7 @@ func (mm *MindMapManager) MoveNode(sourceIdentifier, targetIdentifier string, us
 	sourceNode.ParentID = targetNode.Index
 
 	// Update in storage
-	if err := mm.Store.MoveNode(mm.CurrentMindMap.Root.Content, sourceNode.Index, targetNode.Index); err != nil {
+	if err := mm.Store.MoveNode(mm.CurrentMindMap.Root.Content, mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
 		return fmt.Errorf("failed to move node in storage: %v", err)
 	}
 
@@ -440,7 +431,7 @@ func (mm *MindMapManager) InsertNode(sourceIdentifier, targetIdentifier string, 
 	sourceNode.ParentID = targetParent.Index
 
 	// Update in storage
-	if err := mm.Store.MoveNode(mm.CurrentMindMap.Root.Content, sourceNode.Index, targetParent.Index); err != nil {
+	if err := mm.Store.MoveNode(mm.CurrentMindMap.Root.Content, mm.CurrentUser, sourceNode.Index, targetParent.Index); err != nil {
 		return fmt.Errorf("failed to move node in storage: %v", err)
 	}
 
@@ -548,7 +539,7 @@ func (mm *MindMapManager) updateNodeOrderInDB(mindmapName string, node *models.N
 	var updateNode func(*models.Node) error
 	updateNode = func(n *models.Node) error {
 		for _, child := range n.Children {
-			err := mm.Store.UpdateNodeOrder(mindmapName, child.Index, child.LogicalIndex)
+			err := mm.Store.UpdateNodeOrder(mindmapName, mm.CurrentUser, child.Index, child.LogicalIndex)
 			if err != nil {
 				return err
 			}

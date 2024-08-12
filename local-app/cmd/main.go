@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"strings"
-
 	"mindnoscape/local-app/internal/cli"
 	"mindnoscape/local-app/internal/config"
 	"mindnoscape/local-app/internal/mindmap"
 	"mindnoscape/local-app/internal/storage"
+	"os"
 
 	"github.com/chzyer/readline"
 	_ "github.com/mattn/go-sqlite3"
@@ -61,8 +59,8 @@ func main() {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
 
-	// Initialize mindmap manager
-	mm, err := mindmap.NewMindMapManager(store)
+	// Initialize mindmap manager with the default user
+	mm, err := mindmap.NewMindMapManager(store, "guest")
 	if err != nil {
 		log.Fatalf("Failed to create mindmap manager: %v", err)
 	}
@@ -81,26 +79,29 @@ func main() {
 
 	// Initialize CLI
 	cli := cli.NewCLI(mm, rl)
+	cli.UpdatePrompt()
+
+	// Check for script arguments
+	if len(os.Args) > 1 {
+		for _, scriptFile := range os.Args[1:] {
+			err := cli.ExecuteScript(scriptFile)
+			if err != nil {
+				log.Printf("Error executing script %s: %v", scriptFile, err)
+			}
+		}
+	}
 
 	// Main loop
 	for {
-		line, err := rl.Readline()
-		if err == readline.ErrInterrupt {
-			fmt.Println("Use 'exit' or 'quit' to exit the program.")
-			continue
-		} else if err == io.EOF {
-			break
-		}
-
-		line = strings.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		args := cli.ParseArgs(line)
-		if err := cli.ExecuteCommand(args); err != nil {
-			if errors.Is(err, io.EOF) {
-				break // Exit the loop if ExecuteCommand returns an error containing io.EOF
+		err := cli.Run()
+		if err != nil {
+			if errors.Is(err, readline.ErrInterrupt) {
+				fmt.Println("Use 'exit' or 'quit' to exit the program.")
+				continue
+			} else if errors.Is(err, io.EOF) {
+				break
+			} else if err.Error() == "exit requested: EOF" {
+				break
 			}
 			fmt.Println("Error:", err)
 		}
