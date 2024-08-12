@@ -29,7 +29,7 @@ func (c *CLI) handleUser(args []string) error {
 	case "--del":
 		return c.handleDeleteUser(args[1:])
 	default:
-		return c.handleSwitchUser(args)
+		return c.handleChangeUser(args)
 	}
 }
 
@@ -47,7 +47,7 @@ func (c *CLI) handleNewUser(args []string) error {
 	}
 
 	// Check if user already exists
-	exists, err := c.MindMap.Store.UserExists(username)
+	exists, err := c.Mindmap.Store.UserExists(username)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %v", err)
 	}
@@ -64,7 +64,7 @@ func (c *CLI) handleNewUser(args []string) error {
 		}
 	}
 
-	err = c.MindMap.Store.CreateUser(username, password)
+	err = c.Mindmap.Store.AddUser(username, password)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %v", err)
 	}
@@ -101,7 +101,7 @@ func (c *CLI) handleDeleteUser(args []string) error {
 	}
 
 	// Authenticate user
-	authenticated, err := c.MindMap.Store.AuthenticateUser(username, password)
+	authenticated, err := c.Mindmap.Store.AuthenticateUser(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
 	}
@@ -110,7 +110,7 @@ func (c *CLI) handleDeleteUser(args []string) error {
 	}
 
 	// Delete user and their mindmaps
-	err = c.MindMap.Store.DeleteUser(username)
+	err = c.Mindmap.Store.DeleteUser(username)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %v", err)
 	}
@@ -118,7 +118,7 @@ func (c *CLI) handleDeleteUser(args []string) error {
 	// If the deleted user was the current user, switch to guest
 	if c.CurrentUser == username {
 		c.CurrentUser = "guest"
-		c.MindMap.ChangeUser("guest")
+		_ = c.Mindmap.ChangeUser("guest")
 	}
 
 	c.UI.Success(fmt.Sprintf("User '%s' and all associated mindmaps deleted successfully", username))
@@ -146,7 +146,7 @@ func (c *CLI) handleModifyUser(args []string) error {
 	}
 
 	// Authenticate user
-	authenticated, err := c.MindMap.Store.AuthenticateUser(username, currentPassword)
+	authenticated, err := c.Mindmap.Store.AuthenticateUser(username, currentPassword)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
 	}
@@ -164,7 +164,7 @@ func (c *CLI) handleModifyUser(args []string) error {
 		return err
 	}
 
-	err = c.MindMap.Store.UpdateUser(username, newUsername, newPassword)
+	err = c.Mindmap.Store.ModifyUser(username, newUsername, newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %v", err)
 	}
@@ -176,7 +176,7 @@ func (c *CLI) handleModifyUser(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleSwitchUser(args []string) error {
+func (c *CLI) handleChangeUser(args []string) error {
 	var username, password string
 	var err error
 
@@ -202,7 +202,7 @@ func (c *CLI) handleSwitchUser(args []string) error {
 		}
 	}
 
-	authenticated, err := c.MindMap.Store.AuthenticateUser(username, password)
+	authenticated, err := c.Mindmap.Store.AuthenticateUser(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
 	}
@@ -210,7 +210,7 @@ func (c *CLI) handleSwitchUser(args []string) error {
 		return fmt.Errorf("invalid username or password")
 	}
 
-	err = c.MindMap.ChangeUser(username)
+	err = c.Mindmap.ChangeUser(username)
 	if err != nil {
 		return fmt.Errorf("failed to switch user: %v", err)
 	}
@@ -240,7 +240,7 @@ func (c *CLI) promptForPassword(prompt string) (string, error) {
 	return string(passwordBytes), nil
 }
 
-func (c *CLI) handleAccess(args []string) error {
+func (c *CLI) handleModifyAccess(args []string) error {
 	if len(args) != 2 {
 		return fmt.Errorf("usage: access <mindmap name> <public|private>")
 	}
@@ -255,7 +255,7 @@ func (c *CLI) handleAccess(args []string) error {
 		return fmt.Errorf("invalid access option: use 'public' or 'private'")
 	}
 
-	err := c.MindMap.Store.UpdateMindMapAccess(mindmapName, c.CurrentUser, isPublic)
+	err := c.Mindmap.Store.ModifyMindmapAccess(mindmapName, c.CurrentUser, isPublic)
 	if err != nil {
 		return fmt.Errorf("failed to update mindmap access: %v", err)
 	}
@@ -264,14 +264,14 @@ func (c *CLI) handleAccess(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleNew(args []string) error {
+func (c *CLI) handleNewNode(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: new <mindmap name>")
 	}
 
 	name := args[0]
 	isPublic := c.CurrentUser == "guest"
-	err := c.MindMap.CreateNewMindMap(name, isPublic)
+	err := c.Mindmap.AddMindmap(name, isPublic)
 	if err != nil {
 		return err
 	}
@@ -280,8 +280,8 @@ func (c *CLI) handleNew(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleSwitch(args []string) error {
-	mindmaps, err := c.MindMap.ListMindMaps()
+func (c *CLI) handleChangeMindmap(args []string) error {
+	mindmaps, err := c.Mindmap.ListMindmap()
 	if err != nil {
 		return err
 	}
@@ -291,17 +291,17 @@ func (c *CLI) handleSwitch(args []string) error {
 	}
 
 	if len(args) == 0 {
-		if c.MindMap.CurrentMindMap == nil {
+		if c.Mindmap.CurrentMindmap == nil {
 			c.UI.Info("Not currently in any mindmap, use 'switch <mindmap name>' to switch to a mindmap")
 			return nil
 		}
-		c.MindMap.CurrentMindMap = nil
+		c.Mindmap.CurrentMindmap = nil
 		c.UI.Info("Switched out of the current mindmap")
 		return nil
 	}
 
 	name := args[0]
-	err = c.MindMap.SwitchMindMap(name)
+	err = c.Mindmap.ChangeMindmap(name)
 	if err != nil {
 		return err
 	}
@@ -311,12 +311,12 @@ func (c *CLI) handleSwitch(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleList(args []string) error {
+func (c *CLI) handleListMindmap(args []string) error {
 	if len(args) > 0 {
 		return fmt.Errorf("usage: list")
 	}
 
-	mindmaps, err := c.MindMap.Store.GetAllMindMaps(c.CurrentUser)
+	mindmaps, err := c.Mindmap.Store.GetAllMindmaps(c.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve mindmaps: %v", err)
 	}
@@ -344,7 +344,7 @@ func (c *CLI) handleList(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleAdd(args []string) error {
+func (c *CLI) handleAddNode(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: add <parent> <content> [<extra field label>:<extra field value>]... [--index]")
 	}
@@ -366,7 +366,7 @@ func (c *CLI) handleAdd(args []string) error {
 		}
 	}
 
-	err := c.MindMap.AddNode(parentIdentifier, content, extra, useIndex)
+	err := c.Mindmap.AddNode(parentIdentifier, content, extra, useIndex)
 	if err != nil {
 		return err
 	}
@@ -375,7 +375,7 @@ func (c *CLI) handleAdd(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleDelete(args []string) error {
+func (c *CLI) handleDeleteNode(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: del <node> [--index]")
 	}
@@ -388,7 +388,7 @@ func (c *CLI) handleDelete(args []string) error {
 		useIndex = true
 	}
 
-	err := c.MindMap.DeleteNode(identifier, useIndex)
+	err := c.Mindmap.DeleteNode(identifier, useIndex)
 	if err != nil {
 		return err
 	}
@@ -397,10 +397,10 @@ func (c *CLI) handleDelete(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleClear(args []string) error {
+func (c *CLI) handleDeleteMindmap(args []string) error {
 	if len(args) == 0 {
 		// Clear all mindmaps owned by the current user
-		mindmaps, err := c.MindMap.Store.GetAllMindMaps(c.CurrentUser)
+		mindmaps, err := c.Mindmap.ListMindmap()
 		if err != nil {
 			return fmt.Errorf("failed to get mindmaps: %v", err)
 		}
@@ -408,49 +408,31 @@ func (c *CLI) handleClear(args []string) error {
 		clearedCount := 0
 		for _, mm := range mindmaps {
 			if mm.Owner == c.CurrentUser {
-				err := c.MindMap.Store.ClearAllNodes(mm.Name, c.CurrentUser)
+				err := c.Mindmap.DeleteMindmap(mm.Name)
 				if err != nil {
-					return fmt.Errorf("failed to clear mindmap '%s': %v", mm.Name, err)
+					return fmt.Errorf("failed to delete mindmap '%s': %v", mm.Name, err)
 				}
-				c.MindMap.RemoveMindMap(mm.Name)
 				clearedCount++
 			}
 		}
 
-		if c.MindMap.CurrentMindMap != nil {
-			c.MindMap.CurrentMindMap = nil
-		}
-
-		c.UI.Success(fmt.Sprintf("%d mind map(s) cleared\n", clearedCount))
+		c.UI.Success(fmt.Sprintf("%d mind map(s) deleted", clearedCount))
 	} else {
-		// Clear a specific mindmap
+		// Delete a specific mindmap
 		mindmapName := args[0]
-		exists, err := c.MindMap.Store.MindMapExists(mindmapName, c.CurrentUser)
+		err := c.Mindmap.DeleteMindmap(mindmapName)
 		if err != nil {
-			return fmt.Errorf("failed to check if mindmap '%s' exists: %v", mindmapName, err)
-		}
-		if !exists {
-			return fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+			return fmt.Errorf("failed to delete mindmap '%s': %v", mindmapName, err)
 		}
 
-		err = c.MindMap.Store.ClearAllNodes(mindmapName, c.CurrentUser)
-		if err != nil {
-			return fmt.Errorf("failed to clear mindmap '%s': %v", mindmapName, err)
-		}
-
-		c.MindMap.RemoveMindMap(mindmapName)
-
-		if c.MindMap.CurrentMindMap != nil && c.MindMap.CurrentMindMap.Root.Content == mindmapName {
-			c.MindMap.CurrentMindMap = nil
-		}
-
-		c.UI.Success(fmt.Sprintf("Mind map '%s' cleared\n", mindmapName))
+		c.UI.Success(fmt.Sprintf("Mind map '%s' deleted", mindmapName))
 	}
 
+	c.UpdatePrompt()
 	return nil
 }
 
-func (c *CLI) handleModify(args []string) error {
+func (c *CLI) handleModifyNode(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: mod <node> <content> [<extra field label>:<extra field value>]... [--index]")
 	}
@@ -472,7 +454,7 @@ func (c *CLI) handleModify(args []string) error {
 		}
 	}
 
-	err := c.MindMap.ModifyNode(identifier, content, extra, useIndex)
+	err := c.Mindmap.ModifyNode(identifier, content, extra, useIndex)
 	if err != nil {
 		return err
 	}
@@ -481,7 +463,7 @@ func (c *CLI) handleModify(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleMove(args []string) error {
+func (c *CLI) handleMoveNode(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: move <source> <target> [--index]")
 	}
@@ -495,7 +477,7 @@ func (c *CLI) handleMove(args []string) error {
 		useIndex = true
 	}
 
-	err := c.MindMap.MoveNode(sourceIdentifier, targetIdentifier, useIndex)
+	err := c.Mindmap.MoveNode(sourceIdentifier, targetIdentifier, useIndex)
 	if err != nil {
 		return err
 	}
@@ -504,7 +486,7 @@ func (c *CLI) handleMove(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleInsert(args []string) error {
+func (c *CLI) handleInsertNode(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: insert <source> <target> [--index]")
 	}
@@ -518,7 +500,7 @@ func (c *CLI) handleInsert(args []string) error {
 		useIndex = true
 	}
 
-	err := c.MindMap.InsertNode(sourceIdentifier, targetIdentifier, useIndex)
+	err := c.Mindmap.InsertNode(sourceIdentifier, targetIdentifier, useIndex)
 	if err != nil {
 		return err
 	}
@@ -527,7 +509,7 @@ func (c *CLI) handleInsert(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleShow(args []string) error {
+func (c *CLI) handleShowMindmap(args []string) error {
 	logicalIndex := ""
 	showIndex := false
 
@@ -539,7 +521,7 @@ func (c *CLI) handleShow(args []string) error {
 		}
 	}
 
-	output, err := c.MindMap.Show(logicalIndex, showIndex)
+	output, err := c.Mindmap.ShowMindmap(logicalIndex, showIndex)
 	if err != nil {
 		return err
 	}
@@ -598,7 +580,7 @@ func (c *CLI) printColoredLine(line string) {
 	c.UI.Println("") // New line at the end
 }
 
-func (c *CLI) handleSort(args []string) error {
+func (c *CLI) handleSortNode(args []string) error {
 	identifier := ""
 	field := ""
 	reverse := false
@@ -618,7 +600,7 @@ func (c *CLI) handleSort(args []string) error {
 			}
 		}
 	}
-	err := c.MindMap.Sort(identifier, field, reverse, useIndex)
+	err := c.Mindmap.Sort(identifier, field, reverse, useIndex)
 	if err != nil {
 		return err
 	}
@@ -626,7 +608,7 @@ func (c *CLI) handleSort(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleSave(args []string) error {
+func (c *CLI) handleSaveMindmap(args []string) error {
 	filename := "mindmap.json"
 	format := "json"
 
@@ -637,11 +619,11 @@ func (c *CLI) handleSave(args []string) error {
 		format = args[1]
 	}
 
-	if c.MindMap.CurrentMindMap == nil {
+	if c.Mindmap.CurrentMindmap == nil {
 		return fmt.Errorf("no mindmap selected")
 	}
 
-	err := storage.SaveToFile(c.MindMap.Store, c.MindMap.CurrentMindMap.Root.Content, c.CurrentUser, filename, format)
+	err := storage.SaveToFile(c.Mindmap.Store, c.Mindmap.CurrentMindmap.Root.Content, c.CurrentUser, filename, format)
 	if err != nil {
 		return err
 	}
@@ -650,7 +632,7 @@ func (c *CLI) handleSave(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleLoad(args []string) error {
+func (c *CLI) handleLoadMindmap(args []string) error {
 	filename := "mindmap.json"
 	format := "json"
 
@@ -668,46 +650,64 @@ func (c *CLI) handleLoad(args []string) error {
 	}
 
 	mindmapName := tempRoot.Content
-	exists, err := c.MindMap.Store.MindMapExists(mindmapName, c.CurrentUser)
+	exists, err := c.Mindmap.Store.MindmapExists(mindmapName, c.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to check if mindmap exists: %v", err)
 	}
 
-	isCurrentMindmap := c.MindMap.CurrentMindMap != nil && c.MindMap.CurrentMindMap.Root.Content == mindmapName
+	isCurrentMindmap := c.Mindmap.CurrentMindmap != nil && c.Mindmap.CurrentMindmap.Root.Content == mindmapName
 
 	// If we're currently in the mindmap we're loading, switch out first
 	if isCurrentMindmap {
-		c.MindMap.CurrentMindMap = nil
+		c.Mindmap.CurrentMindmap = nil
 		c.Prompt = "> "
 		fmt.Printf("Switched out of mindmap '%s' before reloading.\n", mindmapName)
 	}
 
+	// Check if the user has permission to modify the mindmap
+	hasPermission, err := c.Mindmap.Store.HasMindmapPermission(mindmapName, c.CurrentUser)
+	if err != nil {
+		return fmt.Errorf("failed to check mindmap permissions: %v", err)
+	}
+	if !hasPermission {
+		return fmt.Errorf("user %s does not have permission to modify mindmap '%s'", c.CurrentUser, mindmapName)
+	}
+
 	if exists {
 		fmt.Printf("Replacing content of existing mindmap '%s'\n", mindmapName)
-		err = c.MindMap.Store.ClearAllNodes(mindmapName, c.CurrentUser)
+		// Delete all nodes except the root
+		nodes, err := c.Mindmap.Store.GetNode(mindmapName, c.CurrentUser, -1)
 		if err != nil {
-			return fmt.Errorf("failed to clear existing nodes for mindmap '%s': %v", mindmapName, err)
+			return fmt.Errorf("failed to retrieve nodes for mindmap '%s': %v", mindmapName, err)
+		}
+		for _, node := range nodes {
+			if node.ParentID != -1 { // Skip the root node
+				err = c.Mindmap.Store.DeleteNode(mindmapName, c.CurrentUser, node.Index)
+				if err != nil {
+					return fmt.Errorf("failed to delete node %d from mindmap '%s': %v", node.Index, mindmapName, err)
+				}
+			}
 		}
 		// Remove from in-memory map as well
-		delete(c.MindMap.MindMaps, mindmapName)
+		delete(c.Mindmap.Mindmaps, mindmapName)
 	} else {
 		fmt.Printf("Creating new mindmap '%s' from file\n", mindmapName)
 	}
 
 	// Load the content into the mindmap
-	err = storage.LoadFromFile(c.MindMap.Store, mindmapName, c.CurrentUser, filename, format)
+	err = storage.LoadFromFile(c.Mindmap.Store, mindmapName, c.CurrentUser, filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to load nodes for mindmap '%s': %v", mindmapName, err)
 	}
 
-	// Create a new MindMap struct
-	newMindMap := &mindmap.MindMap{
+	// Create a new Mindmap struct
+	newMindmap := &mindmap.Mindmap{
 		Nodes: make(map[int]*models.Node),
 	}
-	c.MindMap.MindMaps[mindmapName] = newMindMap
+	c.Mindmap.Mindmaps[mindmapName] = newMindmap
 
 	// Reload the mind map from storage
-	err = c.MindMap.LoadNodes(mindmapName)
+	err = c.Mindmap.LoadNodes(mindmapName)
 	if err != nil {
 		return fmt.Errorf("failed to reload mind map after load: %v", err)
 	}
@@ -716,7 +716,7 @@ func (c *CLI) handleLoad(args []string) error {
 
 	// If we were in the mindmap before, switch back to it
 	if isCurrentMindmap {
-		err = c.MindMap.SwitchMindMap(mindmapName)
+		err = c.Mindmap.ChangeMindmap(mindmapName)
 		if err != nil {
 			return fmt.Errorf("failed to switch back to mindmap '%s': %v", mindmapName, err)
 		}
@@ -727,7 +727,7 @@ func (c *CLI) handleLoad(args []string) error {
 	return nil
 }
 
-func (c *CLI) handleFind(args []string) error {
+func (c *CLI) handleFindNode(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: find <query> [--index]")
 	}
@@ -745,20 +745,13 @@ func (c *CLI) handleFind(args []string) error {
 		query = query[1 : len(query)-1]
 	}
 
-	if c.MindMap.CurrentMindMap == nil {
-		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
+	output, err := c.Mindmap.FindNode(query, showIndex)
+	if err != nil {
+		return fmt.Errorf("failed to find nodes: %v", err)
 	}
 
-	matches := c.MindMap.FindNodes(query)
-
-	if len(matches) == 0 {
-		fmt.Println("No matches found.")
-		return nil
-	}
-
-	fmt.Printf("Found %d matches:\n", len(matches))
-	for _, node := range matches {
-		c.printNode(node, showIndex)
+	for _, line := range output {
+		c.UI.Println(line)
 	}
 
 	return nil
@@ -788,7 +781,7 @@ func (c *CLI) handleUndo(args []string) error {
 		return fmt.Errorf("usage: undo")
 	}
 
-	err := c.MindMap.Undo()
+	err := c.Mindmap.Undo()
 	if err != nil {
 		return err
 	}
@@ -802,7 +795,7 @@ func (c *CLI) handleRedo(args []string) error {
 		return fmt.Errorf("usage: redo")
 	}
 
-	err := c.MindMap.Redo()
+	err := c.Mindmap.Redo()
 	if err != nil {
 		return err
 	}

@@ -9,16 +9,16 @@ import (
 	"mindnoscape/local-app/internal/models"
 )
 
-func ExportToFile(filename string, format string, mindmap *models.MindMap) error {
-	exportableMindMap := mindmap.ToExportable()
+func ExportToFile(filename string, format string, mindmap *models.Mindmap) error {
+	exportableMindmap := mindmap.ToExportable()
 	var data []byte
 	var err error
 
 	switch format {
 	case "json":
-		data, err = json.MarshalIndent(exportableMindMap, "", "  ")
+		data, err = json.MarshalIndent(exportableMindmap, "", "  ")
 	case "xml":
-		data, err = xml.MarshalIndent(exportableMindMap, "", "  ")
+		data, err = xml.MarshalIndent(exportableMindmap, "", "  ")
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
@@ -87,7 +87,7 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 }
 
 func SaveToFile(store Store, mindmapName string, username string, filename string, format string) error {
-	nodes, err := store.GetAllNodesForMindMap(mindmapName, username)
+	nodes, err := store.GetAllNodesForMindmap(mindmapName, username)
 	if err != nil {
 		return fmt.Errorf("failed to get all nodes for mindmap '%s': %v", mindmapName, err)
 	}
@@ -97,7 +97,7 @@ func SaveToFile(store Store, mindmapName string, username string, filename strin
 		return fmt.Errorf("failed to build tree: %v", err)
 	}
 
-	mindmap := &models.MindMap{
+	mindmap := &models.Mindmap{
 		Name: mindmapName,
 		Root: root,
 	}
@@ -113,14 +113,14 @@ func LoadFromFile(store Store, mindmapName string, username string, filename str
 	}
 
 	// Check if the mindmap exists
-	exists, err := store.MindMapExists(mindmapName, username)
+	exists, err := store.MindmapExists(mindmapName, username)
 	if err != nil {
 		return fmt.Errorf("failed to check if mindmap exists: %v", err)
 	}
 
 	// If the mindmap doesn't exist, create it
 	if !exists {
-		_, err = store.AddMindMap(mindmapName, username, false) // Use username and set isPublic to false
+		_, err = store.AddMindmap(mindmapName, username, false) // Use username and set isPublic to false
 		if err != nil {
 			return fmt.Errorf("failed to create mindmap: %v", err)
 		}

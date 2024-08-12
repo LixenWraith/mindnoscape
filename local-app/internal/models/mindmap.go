@@ -1,6 +1,6 @@
 package models
 
-type MindMap struct {
+type Mindmap struct {
 	ID       int    `json:"-"`
 	Name     string `json:"name"`
 	Owner    string `json:"-"`
@@ -8,13 +8,13 @@ type MindMap struct {
 	Root     *Node  `json:"root"`
 }
 
-type ExportableMindMap struct {
+type ExportableMindmap struct {
 	Name string `json:"name"`
 	Root *Node  `json:"root"`
 }
 
-func NewMindMap(id int, name string, owner string, isPublic bool) *MindMap {
-	return &MindMap{
+func NewMindmap(id int, name string, owner string, isPublic bool) *Mindmap {
+	return &Mindmap{
 		ID:       id,
 		Name:     name,
 		Owner:    owner,
@@ -22,8 +22,8 @@ func NewMindMap(id int, name string, owner string, isPublic bool) *MindMap {
 	}
 }
 
-func (m *MindMap) ToExportable() *ExportableMindMap {
-	return &ExportableMindMap{
+func (m *Mindmap) ToExportable() *ExportableMindmap {
+	return &ExportableMindmap{
 		Name: m.Name,
 		Root: m.Root,
 	}

@@ -7,7 +7,7 @@ type Node struct {
 	Children     []*Node           `json:"children,omitempty" xml:"children>node,omitempty"`
 	Extra        map[string]string `json:"extra,omitempty" xml:"extra>field,omitempty"`
 	LogicalIndex string            `json:"logical_index" xml:"logical_index,attr"`
-	MindMapID    int               `json:"mindmap_id" xml:"mindmap_id,attr"` // New field
+	MindmapID    int               `json:"mindmap_id" xml:"mindmap_id,attr"` // New field
 }
 
 func NewNode(index int, content string, mindMapID int) *Node {
@@ -16,6 +16,6 @@ func NewNode(index int, content string, mindMapID int) *Node {
 		Content:   content,
 		Children:  make([]*Node, 0),
 		Extra:     make(map[string]string),
-		MindMapID: mindMapID,
+		MindmapID: mindMapID,
 	}
 }

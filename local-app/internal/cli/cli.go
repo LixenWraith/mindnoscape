@@ -15,7 +15,7 @@ import (
 )
 
 type CLI struct {
-	MindMap      *mindmap.MindMapManager
+	Mindmap      *mindmap.MindmapManager
 	RL           *readline.Instance
 	Prompt       string
 	History      []string
@@ -24,9 +24,9 @@ type CLI struct {
 	UI           *ui.UI
 }
 
-func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
+func NewCLI(mm *mindmap.MindmapManager, rl *readline.Instance) *CLI {
 	cli := &CLI{
-		MindMap:      mm,
+		Mindmap:      mm,
 		RL:           rl,
 		Prompt:       "> ",
 		History:      []string{},
@@ -38,10 +38,15 @@ func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
 	return cli
 }
 
+func (c *CLI) SetUser(username string) {
+	c.CurrentUser = username
+	c.Mindmap.ChangeUser(username)
+}
+
 func (c *CLI) UpdatePrompt() {
 	mindmapName := ""
-	if c.MindMap.CurrentMindMap != nil {
-		mindmapName = c.MindMap.CurrentMindMap.Root.Content
+	if c.Mindmap.CurrentMindmap != nil {
+		mindmapName = c.Mindmap.CurrentMindmap.Root.Content
 	}
 	prompt := c.UI.GetPromptString(c.CurrentUser, mindmapName)
 	c.RL.SetPrompt(prompt)
@@ -66,7 +71,7 @@ func (c *CLI) ExecuteScript(filename string) error {
 		args := c.ParseArgs(command)
 		err := c.ExecuteCommand(args)
 		if err != nil {
-			fmt.Printf("Error executing command '%s': %v\n", command, err)
+			c.UI.PrintCommand(c.UI.GetPromptString(c.CurrentUser, c.Mindmap.CurrentMindmap.Root.Content) + command)
 		}
 		c.UpdatePrompt()
 	}
@@ -78,7 +83,7 @@ func (c *CLI) ExecuteScript(filename string) error {
 	return nil
 }
 
-func (c *CLI) Run() error {
+func (c *CLI) RunInteractive() error {
 	c.UpdatePrompt()
 
 	line, err := c.RL.Readline()
@@ -104,7 +109,7 @@ func (c *CLI) Run() error {
 
 		// Write to history file
 		if err := c.appendToHistoryFile(line); err != nil {
-			fmt.Printf("Failed to write to history file: %v\n", err)
+			c.UI.Error(fmt.Sprintf("Error: %v", err))
 		}
 	}
 
@@ -165,41 +170,41 @@ func (c *CLI) ExecuteCommand(args []string) error {
 	case "user":
 		return c.handleUser(args[1:])
 	case "access":
-		return c.handleAccess(args[1:])
+		return c.handleModifyAccess(args[1:])
 	case "new":
-		return c.handleNew(args[1:])
+		return c.handleNewNode(args[1:])
 	case "switch":
-		err := c.handleSwitch(args[1:])
-		if err == nil && c.MindMap.CurrentMindMap != nil {
+		err := c.handleChangeMindmap(args[1:])
+		if err == nil && c.Mindmap.CurrentMindmap != nil {
 			// Update the prompt only if switch was successful and we're in a mindmap
-			c.Prompt = fmt.Sprintf("%s > ", c.MindMap.CurrentMindMap.Root.Content)
+			c.Prompt = fmt.Sprintf("%s > ", c.Mindmap.CurrentMindmap.Root.Content)
 			c.RL.SetPrompt(c.Prompt)
 		}
 		return err
 	case "list":
-		return c.handleList(args[1:])
+		return c.handleListMindmap(args[1:])
 	case "add":
-		return c.handleAdd(args[1:])
+		return c.handleAddNode(args[1:])
 	case "del":
-		return c.handleDelete(args[1:])
+		return c.handleDeleteNode(args[1:])
 	case "clear":
-		return c.handleClear(args[1:])
+		return c.handleDeleteMindmap(args[1:])
 	case "mod":
-		return c.handleModify(args[1:])
+		return c.handleModifyNode(args[1:])
 	case "move":
-		return c.handleMove(args[1:])
+		return c.handleMoveNode(args[1:])
 	case "insert":
-		return c.handleInsert(args[1:])
+		return c.handleInsertNode(args[1:])
 	case "show":
-		return c.handleShow(args[1:])
+		return c.handleShowMindmap(args[1:])
 	case "save":
-		return c.handleSave(args[1:])
+		return c.handleSaveMindmap(args[1:])
 	case "load":
-		return c.handleLoad(args[1:])
+		return c.handleLoadMindmap(args[1:])
 	case "sort":
-		return c.handleSort(args[1:])
+		return c.handleSortNode(args[1:])
 	case "find":
-		return c.handleFind(args[1:])
+		return c.handleFindNode(args[1:])
 	case "undo":
 		return c.handleUndo(args[1:])
 	case "redo":

@@ -69,7 +69,7 @@ func (s *SQLiteStore) UserExists(username string) (bool, error) {
 	return count > 0, nil
 }
 
-func (s *SQLiteStore) CreateUser(username, password string) error {
+func (s *SQLiteStore) AddUser(username, password string) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -131,7 +131,7 @@ func (s *SQLiteStore) GetUser(username string) (*models.User, error) {
 	return &user, nil
 }
 
-func (s *SQLiteStore) UpdateUser(oldUsername, newUsername, newPassword string) error {
+func (s *SQLiteStore) ModifyUser(oldUsername, newUsername, newPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -183,7 +183,7 @@ func (s *SQLiteStore) AuthenticateUser(username, password string) (bool, error) 
 
 // Mindmap-related methods
 
-func (s *SQLiteStore) AddMindMap(name string, owner string, isPublic bool) (int, error) {
+func (s *SQLiteStore) AddMindmap(name string, owner string, isPublic bool) (int, error) {
 	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", name, owner, isPublic)
 	if err != nil {
 		return 0, err
@@ -195,7 +195,7 @@ func (s *SQLiteStore) AddMindMap(name string, owner string, isPublic bool) (int,
 	return int(id), nil
 }
 
-func (s *SQLiteStore) GetAllMindMaps(username string) ([]MindMapInfo, error) {
+func (s *SQLiteStore) GetAllMindmaps(username string) ([]MindmapInfo, error) {
 	rows, err := s.db.Query(`
         SELECT name, is_public, owner
         FROM mindmaps
@@ -207,9 +207,9 @@ func (s *SQLiteStore) GetAllMindMaps(username string) ([]MindMapInfo, error) {
 	}
 	defer rows.Close()
 
-	var mindmaps []MindMapInfo
+	var mindmaps []MindmapInfo
 	for rows.Next() {
-		var mm MindMapInfo
+		var mm MindmapInfo
 		if err := rows.Scan(&mm.Name, &mm.IsPublic, &mm.Owner); err != nil {
 			return nil, err
 		}
@@ -218,7 +218,7 @@ func (s *SQLiteStore) GetAllMindMaps(username string) ([]MindMapInfo, error) {
 	return mindmaps, nil
 }
 
-func (s *SQLiteStore) MindMapExists(name string, username string) (bool, error) {
+func (s *SQLiteStore) MindmapExists(name string, username string) (bool, error) {
 	var count int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", name, username).Scan(&count)
 	if err != nil {
@@ -227,7 +227,52 @@ func (s *SQLiteStore) MindMapExists(name string, username string) (bool, error) 
 	return count > 0, nil
 }
 
-func (s *SQLiteStore) UpdateMindMapAccess(name string, username string, isPublic bool) error {
+func (s *SQLiteStore) DeleteMindmap(name string, username string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Check if the mindmap exists and the user has permission to delete it
+	var count int
+	err = tx.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND owner = ?", name, username).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check mindmap ownership: %v", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("mindmap '%s' does not exist or user does not have permission to delete it", name)
+	}
+
+	// Get the mindmap ID
+	var mindmapID int
+	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", name, username).Scan(&mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to get mindmap ID: %v", err)
+	}
+
+	// Delete all nodes for this mindmap
+	_, err = tx.Exec("DELETE FROM nodes WHERE mindmap_id = ?", mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to delete nodes: %v", err)
+	}
+
+	// Delete all node attributes for this mindmap's nodes
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id NOT IN (SELECT id FROM nodes)")
+	if err != nil {
+		return fmt.Errorf("failed to delete node attributes: %v", err)
+	}
+
+	// Delete the mindmap entry
+	_, err = tx.Exec("DELETE FROM mindmaps WHERE id = ?", mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to delete mindmap: %v", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ModifyMindmapAccess(name string, username string, isPublic bool) error {
 	_, err := s.db.Exec("UPDATE mindmaps SET is_public = ? WHERE name = ? AND owner = ?", isPublic, name, username)
 	return err
 }
@@ -280,45 +325,95 @@ func (s *SQLiteStore) AddNode(mindmapName string, username string, parentID int,
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetNode(mindmapName string, username string, id int) (*models.Node, error) {
-	node := &models.Node{Index: id}
+func (s *SQLiteStore) GetNode(mindmapName string, username string, id int) ([]*models.Node, error) {
+	if id == -1 {
+		// Retrieve all nodes for the mindmap
+		var mindmapID int
+		err := s.db.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&mindmapID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get mindmap info: %v", err)
+		}
 
-	var parentID sql.NullInt64
-	err := s.db.QueryRow(`
-        SELECT COALESCE(n.parent_id, -1), n.content, n.logical_index 
-        FROM nodes n
-        JOIN mindmaps m ON n.mindmap_id = m.id
-        WHERE m.name = ? AND (m.owner = ? OR m.is_public = 1) AND n.id = ?`,
-		mindmapName, username, id).Scan(&parentID, &node.Content, &node.LogicalIndex)
-	if err != nil {
-		return nil, err
-	}
+		rows, err := s.db.Query(`
+            SELECT id, COALESCE(parent_id, -1) as parent_id, content, logical_index 
+            FROM nodes 
+            WHERE mindmap_id = ?
+            ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, logical_index
+        `, mindmapID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query nodes: %v", err)
+		}
+		defer rows.Close()
 
-	if parentID.Valid {
-		node.ParentID = int(parentID.Int64)
+		nodes := make([]*models.Node, 0)
+		for rows.Next() {
+			node := &models.Node{Extra: make(map[string]string), Children: []*models.Node{}}
+			if err := rows.Scan(&node.Index, &node.ParentID, &node.Content, &node.LogicalIndex); err != nil {
+				return nil, fmt.Errorf("failed to scan node: %v", err)
+			}
+			node.MindmapID = mindmapID
+			nodes = append(nodes, node)
+		}
+
+		// Fetch extra attributes for all nodes
+		for _, node := range nodes {
+			attrRows, err := s.db.Query("SELECT key, value FROM node_attributes WHERE node_id = ?", node.Index)
+			if err != nil {
+				return nil, err
+			}
+			for attrRows.Next() {
+				var key, value string
+				if err := attrRows.Scan(&key, &value); err != nil {
+					attrRows.Close()
+					return nil, err
+				}
+				node.Extra[key] = value
+			}
+			attrRows.Close()
+		}
+
+		return nodes, nil
 	} else {
-		node.ParentID = -1 // or 0, depending on how you want to represent the root
-	}
+		// Retrieve a single node
+		node := &models.Node{Index: id, Extra: make(map[string]string)}
 
-	node.Extra = make(map[string]string)
-	rows, err := s.db.Query("SELECT key, value FROM node_attributes WHERE node_id = ?", id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
+		var parentID sql.NullInt64
+		err := s.db.QueryRow(`
+            SELECT COALESCE(n.parent_id, -1), n.content, n.logical_index, m.id
+            FROM nodes n
+            JOIN mindmaps m ON n.mindmap_id = m.id
+            WHERE m.name = ? AND (m.owner = ? OR m.is_public = 1) AND n.id = ?`,
+			mindmapName, username, id).Scan(&parentID, &node.Content, &node.LogicalIndex, &node.MindmapID)
+		if err != nil {
 			return nil, err
 		}
-		node.Extra[key] = value
-	}
 
-	return node, nil
+		if parentID.Valid {
+			node.ParentID = int(parentID.Int64)
+		} else {
+			node.ParentID = -1
+		}
+
+		// Fetch extra attributes
+		rows, err := s.db.Query("SELECT key, value FROM node_attributes WHERE node_id = ?", id)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var key, value string
+			if err := rows.Scan(&key, &value); err != nil {
+				return nil, err
+			}
+			node.Extra[key] = value
+		}
+
+		return []*models.Node{node}, nil
+	}
 }
 
-func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string) ([]*models.Node, error) {
+func (s *SQLiteStore) GetAllNodesForMindmap(mindmapName string, username string) ([]*models.Node, error) {
 	// First, get the mindmap ID and check permissions
 	var mindmapID int
 	var owner string
@@ -346,7 +441,7 @@ func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string)
 		if err := rows.Scan(&node.Index, &node.ParentID, &node.Content, &node.LogicalIndex); err != nil {
 			return nil, fmt.Errorf("failed to scan node: %v", err)
 		}
-		node.MindMapID = mindmapID
+		node.MindmapID = mindmapID
 		nodes = append(nodes, node)
 	}
 
@@ -370,7 +465,7 @@ func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string)
 	return nodes, nil
 }
 
-func (s *SQLiteStore) UpdateNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
+func (s *SQLiteStore) ModifyNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -424,7 +519,7 @@ func (s *SQLiteStore) DeleteNode(mindmapName string, username string, id int) er
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetParentNode(mindmapName string, username string, id int) (*models.Node, error) {
+func (s *SQLiteStore) GetParentNode(mindmapName string, username string, id int) ([]*models.Node, error) {
 	var parentID int
 	err := s.db.QueryRow(`
         SELECT parent_id 
@@ -455,7 +550,7 @@ func (s *SQLiteStore) UpdateNodeOrder(mindmapName string, username string, nodeI
 	return err
 }
 
-func (s *SQLiteStore) ClearAllNodes(mindmapName string, username string) error {
+func (s *SQLiteStore) DeleteAllNodes(mindmapName string, username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -493,7 +588,7 @@ func (s *SQLiteStore) ClearAllNodes(mindmapName string, username string) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) HasMindMapPermission(mindmapName string, username string) (bool, error) {
+func (s *SQLiteStore) HasMindmapPermission(mindmapName string, username string) (bool, error) {
 	if username == "guest" {
 		// Guest can only access public mindmaps
 		var isPublic bool

@@ -55,7 +55,7 @@ func main() {
 	}
 
 	// Initialize mindmap manager with the default user
-	mm, err := mindmap.NewMindMapManager(store, "guest")
+	mm, err := mindmap.NewMindmapManager(store, "guest")
 	if err != nil {
 		UI.Error(fmt.Sprintf("Failed to create mindmap manager: %v", err))
 		os.Exit(1)
@@ -88,7 +88,7 @@ func main() {
 
 	// Main loop
 	for {
-		err := cli.Run()
+		err := cli.RunInteractive()
 		if err != nil {
 			if errors.Is(err, readline.ErrInterrupt) {
 				UI.Println("Use 'exit' or 'quit' to exit the program.")
