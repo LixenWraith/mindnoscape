@@ -5,36 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"mindnoscape/local-app/internal/cli"
-	"mindnoscape/local-app/internal/config"
-	"mindnoscape/local-app/internal/mindmap"
-	"mindnoscape/local-app/internal/storage"
+	_ "log"
 	"os"
 
 	"github.com/chzyer/readline"
 	_ "github.com/mattn/go-sqlite3"
+
+	"mindnoscape/local-app/internal/cli"
+	"mindnoscape/local-app/internal/config"
+	"mindnoscape/local-app/internal/mindmap"
+	"mindnoscape/local-app/internal/storage"
+	"mindnoscape/local-app/internal/ui"
 )
 
 var db *sql.DB
 
-func cleanup() {
-	if db != nil {
-		fmt.Println("Closing database connection...")
-		err := db.Close()
-		if err != nil {
-			log.Printf("Error closing database: %v", err)
-		}
-	}
-	fmt.Println("Goodbye!")
-}
-
 func main() {
-	fmt.Println("Welcome to Mindnoscape! Use 'help' for the list of commands.")
+	UI := ui.NewUI(os.Stdout, true)
+	UI.Println("Welcome to Mindnoscape! Use 'help' for the list of commands.")
 
 	// Load configuration
 	if err := config.LoadConfig(); err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		UI.Error(fmt.Sprintf("Failed to load configuration: %v", err))
+		os.Exit(1)
 	}
 	cfg := config.GetConfig()
 
@@ -42,51 +35,53 @@ func main() {
 	if err := func() error {
 		return os.WriteFile(cfg.HistoryFile, []byte{}, 0644)
 	}(); err != nil {
-		log.Printf("Failed to clear history file: %v", err)
+		UI.Error(fmt.Sprintf("Failed to clear history file: %v", err))
 	}
 
 	var err error
 	// Initialize SQLite database using the path from config
 	db, err = sql.Open("sqlite3", cfg.DatabasePath)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		UI.Error(fmt.Sprintf("Failed to open database: %v", err))
+		os.Exit(1)
 	}
 	defer cleanup()
 
 	// Initialize storage
 	store, err := storage.NewSQLiteStore(db)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		UI.Error(fmt.Sprintf("Failed to initialize storage: %v", err))
+		os.Exit(1)
 	}
 
 	// Initialize mindmap manager with the default user
 	mm, err := mindmap.NewMindMapManager(store, "guest")
 	if err != nil {
-		log.Fatalf("Failed to create mindmap manager: %v", err)
+		UI.Error(fmt.Sprintf("Failed to create mindmap manager: %v", err))
+		os.Exit(1)
 	}
 
 	// Initialize readline with history file from config
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "> ",
 		HistoryFile:     cfg.HistoryFile,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize readline: %v", err)
+		UI.Error(fmt.Sprintf("Failed to initialize readline: %v", err))
+		os.Exit(1)
 	}
 	defer rl.Close()
 
 	// Initialize CLI
 	cli := cli.NewCLI(mm, rl)
-	cli.UpdatePrompt()
 
 	// Check for script arguments
 	if len(os.Args) > 1 {
 		for _, scriptFile := range os.Args[1:] {
 			err := cli.ExecuteScript(scriptFile)
 			if err != nil {
-				log.Printf("Error executing script %s: %v", scriptFile, err)
+				UI.Error(fmt.Sprintf("Error executing script %s: %v", scriptFile, err))
 			}
 		}
 	}
@@ -96,17 +91,26 @@ func main() {
 		err := cli.Run()
 		if err != nil {
 			if errors.Is(err, readline.ErrInterrupt) {
-				fmt.Println("Use 'exit' or 'quit' to exit the program.")
+				UI.Println("Use 'exit' or 'quit' to exit the program.")
 				continue
 			} else if errors.Is(err, io.EOF) {
 				break
 			} else if err.Error() == "exit requested: EOF" {
 				break
 			}
-			fmt.Println("Error:", err)
+			UI.Error(fmt.Sprintf("Error: %v", err))
 		}
-
-		// Update the prompt after each command
-		rl.SetPrompt(cli.Prompt)
 	}
+}
+
+func cleanup() {
+	UI := ui.NewUI(os.Stdout, true)
+	if db != nil {
+		UI.Println("Closing database connection...")
+		err := db.Close()
+		if err != nil {
+			UI.Error(fmt.Sprintf("Error closing database: %v", err))
+		}
+	}
+	UI.Println("Goodbye!")
 }

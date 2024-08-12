@@ -12,6 +12,7 @@ type MindMapInfo struct {
 
 type Store interface {
 	CreateUser(username, hashedPassword string) error
+	DeleteUser(username string) error
 	UserExists(username string) (bool, error)
 	GetUser(username string) (*models.User, error)
 	UpdateUser(oldUsername, newUsername, newHashedPassword string) error

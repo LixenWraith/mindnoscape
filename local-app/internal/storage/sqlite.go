@@ -3,9 +3,10 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"mindnoscape/local-app/internal/models"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"mindnoscape/local-app/internal/models"
 )
 
 type SQLiteStore struct {
@@ -76,6 +77,47 @@ func (s *SQLiteStore) CreateUser(username, password string) error {
 
 	_, err = s.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, hashedPassword)
 	return err
+}
+
+func (s *SQLiteStore) DeleteUser(username string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete all nodes and node attributes for mindmaps owned by this user
+	_, err = tx.Exec(`
+        DELETE FROM nodes WHERE mindmap_id IN (
+            SELECT id FROM mindmaps WHERE owner = ?
+        )
+    `, username)
+	if err != nil {
+		return fmt.Errorf("failed to delete nodes: %v", err)
+	}
+
+	_, err = tx.Exec(`
+        DELETE FROM node_attributes WHERE node_id NOT IN (
+            SELECT id FROM nodes
+        )
+    `)
+	if err != nil {
+		return fmt.Errorf("failed to delete node attributes: %v", err)
+	}
+
+	// Delete all mindmaps owned by this user
+	_, err = tx.Exec("DELETE FROM mindmaps WHERE owner = ?", username)
+	if err != nil {
+		return fmt.Errorf("failed to delete mindmaps: %v", err)
+	}
+
+	// Delete the user
+	_, err = tx.Exec("DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %v", err)
+	}
+
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) GetUser(username string) (*models.User, error) {
@@ -286,8 +328,6 @@ func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string)
 		return nil, fmt.Errorf("failed to get mindmap info: %v", err)
 	}
 
-	fmt.Printf("Debug: Mindmap '%s' - ID: %d, Owner: %s, IsPublic: %v\n", mindmapName, mindmapID, owner, isPublic)
-
 	// Then get all nodes for this mindmap
 	rows, err := s.db.Query(`
         SELECT id, COALESCE(parent_id, -1) as parent_id, content, logical_index 
@@ -308,7 +348,6 @@ func (s *SQLiteStore) GetAllNodesForMindMap(mindmapName string, username string)
 		}
 		node.MindMapID = mindmapID
 		nodes = append(nodes, node)
-		fmt.Printf("Debug: Node - Index: %d, ParentID: %d, Content: %s, LogicalIndex: %s\n", node.Index, node.ParentID, node.Content, node.LogicalIndex)
 	}
 
 	// Fetch extra attributes for all nodes
@@ -423,33 +462,49 @@ func (s *SQLiteStore) ClearAllNodes(mindmapName string, username string) error {
 	}
 	defer tx.Rollback()
 
-	// Get the mindmap ID and check ownership
-	var mindmapID int
-	var owner string
-	err = tx.QueryRow("SELECT id, owner FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID, &owner)
+	// Check if the user owns the mindmap
+	var count int
+	err = tx.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&count)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("mindmap '%s' does not exist or you don't have permission to clear it", mindmapName)
-		}
-		return fmt.Errorf("failed to get mindmap info: %v", err)
+		return fmt.Errorf("failed to check mindmap ownership: %v", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("user does not have permission to clear this mindmap")
 	}
 
 	// Delete all nodes for this mindmap
-	_, err = tx.Exec("DELETE FROM nodes WHERE mindmap_id = ?", mindmapID)
+	_, err = tx.Exec("DELETE FROM nodes WHERE mindmap_id = (SELECT id FROM mindmaps WHERE name = ? AND owner = ?)", mindmapName, username)
 	if err != nil {
 		return fmt.Errorf("failed to delete nodes: %v", err)
 	}
 
 	// Delete all node attributes for this mindmap's nodes
-	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id IN (SELECT id FROM nodes WHERE mindmap_id = ?)", mindmapID)
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id NOT IN (SELECT id FROM nodes)")
 	if err != nil {
 		return fmt.Errorf("failed to delete node attributes: %v", err)
+	}
+
+	// Delete the mindmap entry
+	_, err = tx.Exec("DELETE FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username)
+	if err != nil {
+		return fmt.Errorf("failed to delete mindmap: %v", err)
 	}
 
 	return tx.Commit()
 }
 
 func (s *SQLiteStore) HasMindMapPermission(mindmapName string, username string) (bool, error) {
+	if username == "guest" {
+		// Guest can only access public mindmaps
+		var isPublic bool
+		err := s.db.QueryRow("SELECT is_public FROM mindmaps WHERE name = ?", mindmapName).Scan(&isPublic)
+		if err != nil {
+			return false, err
+		}
+		return isPublic, nil
+	}
+
+	// For regular users, check ownership or public status
 	var count int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)
 	if err != nil {

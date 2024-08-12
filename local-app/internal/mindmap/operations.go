@@ -2,15 +2,26 @@ package mindmap
 
 import (
 	"fmt"
-	"mindnoscape/local-app/internal/models"
 	"sort"
 	"strconv"
 	"strings"
+
+	"mindnoscape/local-app/internal/models"
 )
 
 func (mm *MindMapManager) ensureCurrentMindMap() error {
 	if mm.CurrentMindMap == nil {
-		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap or 'new' to create a new one")
+		return fmt.Errorf("no mindmap selected, use 'switch' command to select a mindmap")
+	}
+	if mm.CurrentUser == "" {
+		return fmt.Errorf("no user authenticated")
+	}
+	hasPermission, err := mm.Store.HasMindMapPermission(mm.CurrentMindMap.Root.Content, mm.CurrentUser)
+	if err != nil {
+		return fmt.Errorf("failed to check mindmap permissions: %v", err)
+	}
+	if !hasPermission {
+		return fmt.Errorf("user %s does not have permission to access the current mindmap", mm.CurrentUser)
 	}
 	return nil
 }
@@ -103,8 +114,6 @@ func (mm *MindMapManager) AddNode(parentIdentifier string, content string, extra
 		}
 		mm.addToHistory(op)
 	}
-
-	fmt.Printf("Added new node: Index= '%v' Content='%s', LogicalIndex='%s', ParentIndex=%d\n", newNode.Index, newNode.Content, newNode.LogicalIndex, parentNode.Index)
 
 	return nil
 }
@@ -239,7 +248,6 @@ func (mm *MindMapManager) Clear() error {
 
 	mm.ClearOperationHistory()
 
-	fmt.Printf("Mind map '%s' cleared and removed\n", mindmapName)
 	return nil
 }
 
@@ -479,8 +487,6 @@ func (mm *MindMapManager) Sort(identifier string, field string, reverse bool, us
 	if node == nil {
 		return fmt.Errorf("node not found")
 	}
-
-	fmt.Printf("Sorting children of node: %s (LogicalIndex: %s)\n", node.Content, node.LogicalIndex)
 
 	mm.sortNodeChildrenRecursively(node, field, reverse)
 	err = mm.recalculateLogicalIndices(node)

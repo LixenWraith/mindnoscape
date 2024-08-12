@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
+
 	"mindnoscape/local-app/internal/mindmap"
+	"mindnoscape/local-app/internal/ui"
 )
 
 type CLI struct {
@@ -19,26 +21,30 @@ type CLI struct {
 	History      []string
 	HistoryIndex int
 	CurrentUser  string
+	UI           *ui.UI
 }
 
 func NewCLI(mm *mindmap.MindMapManager, rl *readline.Instance) *CLI {
-	return &CLI{
+	cli := &CLI{
 		MindMap:      mm,
 		RL:           rl,
 		Prompt:       "> ",
 		History:      []string{},
 		HistoryIndex: -1,
 		CurrentUser:  "guest",
+		UI:           ui.NewUI(os.Stdout, true),
 	}
+	cli.UpdatePrompt()
+	return cli
 }
 
 func (c *CLI) UpdatePrompt() {
+	mindmapName := ""
 	if c.MindMap.CurrentMindMap != nil {
-		c.Prompt = fmt.Sprintf("%s@%s > ", c.CurrentUser, c.MindMap.CurrentMindMap.Root.Content)
-	} else {
-		c.Prompt = fmt.Sprintf("%s > ", c.CurrentUser)
+		mindmapName = c.MindMap.CurrentMindMap.Root.Content
 	}
-	c.RL.SetPrompt(c.Prompt)
+	prompt := c.UI.GetPromptString(c.CurrentUser, mindmapName)
+	c.RL.SetPrompt(prompt)
 }
 
 func (c *CLI) ExecuteScript(filename string) error {
@@ -73,6 +79,8 @@ func (c *CLI) ExecuteScript(filename string) error {
 }
 
 func (c *CLI) Run() error {
+	c.UpdatePrompt()
+
 	line, err := c.RL.Readline()
 	if errors.Is(err, readline.ErrInterrupt) {
 		return fmt.Errorf("operation interrupted by user")
@@ -99,9 +107,6 @@ func (c *CLI) Run() error {
 			fmt.Printf("Failed to write to history file: %v\n", err)
 		}
 	}
-
-	// Update the prompt after each command
-	c.UpdatePrompt()
 
 	return err
 }
@@ -226,7 +231,7 @@ func (c *CLI) printHelp(command string) {
 
 // commandHelp contains help text for each command.
 var commandHelp = map[string]string{
-	"user": `Syntax: user [--new/--mod][<username> [password]]
+	"user": `Syntax: user [--new/--mod/--del][<username> [password]]
 Description: Manages user accounts and authentication.
 - If no argument is given: Displays the current username.
 - If one argument is given: Prompts for password and switches to the provided user.
@@ -266,6 +271,8 @@ Examples:
 
 	"list": `Syntax: list
 Description: Lists all available mindmaps in the database.
+- Public mindmaps are marked with '+'.
+- Private mindmaps are marked with '-'.
 Example: list`,
 
 	"add": `Syntax: add <logical index> <content> [<extra field label>:<extra field value>]... [--index]

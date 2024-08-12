@@ -2,14 +2,16 @@ package cli
 
 import (
 	"fmt"
-	"golang.org/x/crypto/ssh/terminal"
 	"io"
-	"mindnoscape/local-app/internal/mindmap"
-	"mindnoscape/local-app/internal/models"
+	"mindnoscape/local-app/internal/ui"
 	"sort"
 	"strings"
 	"syscall"
 
+	"golang.org/x/crypto/ssh/terminal"
+
+	"mindnoscape/local-app/internal/mindmap"
+	"mindnoscape/local-app/internal/models"
 	"mindnoscape/local-app/internal/storage"
 )
 
@@ -24,6 +26,8 @@ func (c *CLI) handleUser(args []string) error {
 		return c.handleNewUser(args[1:])
 	case "--mod":
 		return c.handleModifyUser(args[1:])
+	case "--del":
+		return c.handleDeleteUser(args[1:])
 	default:
 		return c.handleSwitchUser(args)
 	}
@@ -66,6 +70,58 @@ func (c *CLI) handleNewUser(args []string) error {
 	}
 
 	fmt.Printf("User '%s' created successfully\n", username)
+	return nil
+}
+
+func (c *CLI) handleDeleteUser(args []string) error {
+	var username, password string
+	var err error
+
+	switch len(args) {
+	case 0:
+		username, err = c.promptForInput("Enter username to delete: ")
+		if err != nil {
+			return err
+		}
+		password, err = c.promptForPassword("Enter password: ")
+		if err != nil {
+			return err
+		}
+	case 1:
+		username = args[0]
+		password, err = c.promptForPassword("Enter password: ")
+		if err != nil {
+			return err
+		}
+	case 2:
+		username = args[0]
+		password = args[1]
+	default:
+		return fmt.Errorf("usage: user --del [<username> [password]]")
+	}
+
+	// Authenticate user
+	authenticated, err := c.MindMap.Store.AuthenticateUser(username, password)
+	if err != nil {
+		return fmt.Errorf("authentication error: %v", err)
+	}
+	if !authenticated {
+		return fmt.Errorf("invalid username or password")
+	}
+
+	// Delete user and their mindmaps
+	err = c.MindMap.Store.DeleteUser(username)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %v", err)
+	}
+
+	// If the deleted user was the current user, switch to guest
+	if c.CurrentUser == username {
+		c.CurrentUser = "guest"
+		c.MindMap.ChangeUser("guest")
+	}
+
+	c.UI.Success(fmt.Sprintf("User '%s' and all associated mindmaps deleted successfully", username))
 	return nil
 }
 
@@ -161,6 +217,7 @@ func (c *CLI) handleSwitchUser(args []string) error {
 
 	c.CurrentUser = username
 	fmt.Printf("Switched to user: %s\n", username)
+	c.UpdatePrompt()
 	return nil
 }
 
@@ -219,13 +276,11 @@ func (c *CLI) handleNew(args []string) error {
 		return err
 	}
 
-	fmt.Printf("New mindmap '%s' created and switched to\n", name)
-
+	c.UI.Success(fmt.Sprintf("New mindmap '%s' created and switched to", name))
 	return nil
 }
 
 func (c *CLI) handleSwitch(args []string) error {
-	// First, check if there are any mindmaps available
 	mindmaps, err := c.MindMap.ListMindMaps()
 	if err != nil {
 		return err
@@ -236,14 +291,12 @@ func (c *CLI) handleSwitch(args []string) error {
 	}
 
 	if len(args) == 0 {
-		// Check if we're currently in a mindmap
 		if c.MindMap.CurrentMindMap == nil {
-			fmt.Println("Not currently in any mindmap, use 'switch <mindmap name>' to switch to a mindmap")
+			c.UI.Info("Not currently in any mindmap, use 'switch <mindmap name>' to switch to a mindmap")
 			return nil
 		}
-		// Switch out of the current mindmap
 		c.MindMap.CurrentMindMap = nil
-		fmt.Println("Switched out of the current mindmap")
+		c.UI.Info("Switched out of the current mindmap")
 		return nil
 	}
 
@@ -253,7 +306,8 @@ func (c *CLI) handleSwitch(args []string) error {
 		return err
 	}
 
-	fmt.Printf("Switched to mindmap '%s'.\n", name)
+	c.UI.Success(fmt.Sprintf("Switched to mindmap '%s'", name))
+	c.UpdatePrompt()
 	return nil
 }
 
@@ -268,19 +322,22 @@ func (c *CLI) handleList(args []string) error {
 	}
 
 	if len(mindmaps) == 0 {
-		fmt.Println("No mindmaps available")
+		c.UI.Println("No mindmaps available")
 	} else {
-		fmt.Println("Available mindmaps:")
-		for i, mm := range mindmaps {
-			access := "private"
-			if mm.IsPublic {
-				access = "public"
+		c.UI.Println("Available mindmaps:")
+		for _, mm := range mindmaps {
+			accessSymbol := "+"
+			accessColor := ui.ColorGreen
+			if !mm.IsPublic {
+				accessSymbol = "-"
+				accessColor = ui.ColorRed
 			}
-			ownerInfo := ""
+			c.UI.Print(mm.Name + " ")
+			c.UI.PrintColored(accessSymbol, accessColor)
 			if mm.Owner != c.CurrentUser {
-				ownerInfo = fmt.Sprintf(" (owner: %s)", mm.Owner)
+				c.UI.Printf(" (owner: %s)", mm.Owner)
 			}
-			fmt.Printf("%d. (%s) %s%s\n", i+1, access, mm.Name, ownerInfo)
+			c.UI.Println("")
 		}
 	}
 
@@ -314,7 +371,7 @@ func (c *CLI) handleAdd(args []string) error {
 		return err
 	}
 
-	fmt.Println("Node added successfully")
+	c.UI.Success("Node added successfully")
 	return nil
 }
 
@@ -336,7 +393,7 @@ func (c *CLI) handleDelete(args []string) error {
 		return err
 	}
 
-	fmt.Println("Node deleted successfully")
+	c.UI.Success("Node deleted successfully")
 	return nil
 }
 
@@ -362,10 +419,9 @@ func (c *CLI) handleClear(args []string) error {
 
 		if c.MindMap.CurrentMindMap != nil {
 			c.MindMap.CurrentMindMap = nil
-			c.UpdatePrompt()
 		}
 
-		fmt.Printf("%d mind map(s) cleared\n", clearedCount)
+		c.UI.Success(fmt.Sprintf("%d mind map(s) cleared\n", clearedCount))
 	} else {
 		// Clear a specific mindmap
 		mindmapName := args[0]
@@ -388,7 +444,7 @@ func (c *CLI) handleClear(args []string) error {
 			c.MindMap.CurrentMindMap = nil
 		}
 
-		fmt.Printf("Mind map '%s' cleared\n", mindmapName)
+		c.UI.Success(fmt.Sprintf("Mind map '%s' cleared\n", mindmapName))
 	}
 
 	return nil
@@ -421,7 +477,7 @@ func (c *CLI) handleModify(args []string) error {
 		return err
 	}
 
-	fmt.Println("Node modified successfully")
+	c.UI.Success("Node modified successfully")
 	return nil
 }
 
@@ -444,7 +500,7 @@ func (c *CLI) handleMove(args []string) error {
 		return err
 	}
 
-	fmt.Println("Node moved successfully")
+	c.UI.Success("Node moved successfully")
 	return nil
 }
 
@@ -467,7 +523,7 @@ func (c *CLI) handleInsert(args []string) error {
 		return err
 	}
 
-	fmt.Println("Node inserted successfully")
+	c.UI.Success("Node inserted successfully")
 	return nil
 }
 
@@ -483,7 +539,63 @@ func (c *CLI) handleShow(args []string) error {
 		}
 	}
 
-	return c.MindMap.Show(logicalIndex, showIndex)
+	output, err := c.MindMap.Show(logicalIndex, showIndex)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range output {
+		c.printColoredLine(line)
+	}
+
+	return nil
+}
+
+func (c *CLI) printColoredLine(line string) {
+	colorMap := map[string]ui.Color{
+		"{{yellow}}":    ui.ColorYellow,
+		"{{orange}}":    ui.ColorOrange,
+		"{{darkbrown}}": ui.ColorDarkBrown,
+		"{{default}}":   ui.ColorDefault,
+	}
+
+	for len(line) > 0 {
+		startIndex := strings.Index(line, "{{")
+		if startIndex == -1 {
+			c.UI.Print(line)
+			break
+		}
+
+		endIndex := strings.Index(line, "}}")
+		if endIndex == -1 {
+			c.UI.Print(line)
+			break
+		}
+
+		// Print the part before the color code
+		if startIndex > 0 {
+			c.UI.Print(line[:startIndex])
+		}
+
+		colorCode := line[startIndex : endIndex+2]
+		color, exists := colorMap[colorCode]
+		if !exists {
+			color = ui.ColorDefault
+		}
+
+		// Find the next color code or the end of the string
+		nextStartIndex := strings.Index(line[endIndex+2:], "{{")
+		if nextStartIndex == -1 {
+			// No more color codes, print the rest of the line
+			c.UI.PrintColored(line[endIndex+2:], color)
+			break
+		} else {
+			// Print the part until the next color code
+			c.UI.PrintColored(line[endIndex+2:endIndex+2+nextStartIndex], color)
+			line = line[endIndex+2+nextStartIndex:]
+		}
+	}
+	c.UI.Println("") // New line at the end
 }
 
 func (c *CLI) handleSort(args []string) error {
@@ -510,7 +622,7 @@ func (c *CLI) handleSort(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Sorted successfully")
+	c.UI.Success("Sorted successfully")
 	return nil
 }
 
@@ -681,7 +793,7 @@ func (c *CLI) handleUndo(args []string) error {
 		return err
 	}
 
-	fmt.Println("Undo successful")
+	c.UI.Success("Undo successful")
 	return nil
 }
 
@@ -695,7 +807,7 @@ func (c *CLI) handleRedo(args []string) error {
 		return err
 	}
 
-	fmt.Println("Redo successful")
+	c.UI.Success("Redo successful")
 	return nil
 }
 

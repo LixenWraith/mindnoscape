@@ -11,6 +11,13 @@ import (
 	"mindnoscape/local-app/internal/storage"
 )
 
+const (
+	ColorYellow    = "{{yellow}}"
+	ColorOrange    = "{{orange}}"
+	ColorDarkBrown = "{{darkbrown}}"
+	ColorDefault   = "{{default}}"
+)
+
 type MindMap struct {
 	Root     *models.Node
 	Nodes    map[int]*models.Node
@@ -88,7 +95,6 @@ func (mm *MindMapManager) ChangeUser(username string) error {
 	mm.CurrentUser = username
 	mm.ClearOperationHistory()
 
-	fmt.Printf("Changed to user %s, loaded %d mindmaps\n", username, len(mm.MindMaps))
 	return nil
 }
 
@@ -112,8 +118,6 @@ func NewMindMapManager(store storage.Store, username string) (*MindMapManager, e
 			Nodes: make(map[int]*models.Node),
 		}
 	}
-
-	fmt.Printf("Loaded %d mindmaps for user %s\n", len(mm.MindMaps), username)
 
 	return mm, nil
 }
@@ -168,7 +172,6 @@ func (mm *MindMapManager) CreateNewMindMap(name string, isPublic bool) error {
 	mm.MindMaps[name] = newMindMap
 	mm.CurrentMindMap = newMindMap
 
-	fmt.Printf("Created new mindmap '%s' (ID: %d) for user %s\n", name, mindmapID, mm.CurrentUser)
 	return nil
 }
 
@@ -177,7 +180,6 @@ func (mm *MindMapManager) RemoveMindMap(name string) {
 }
 
 func (mm *MindMapManager) SwitchMindMap(name string) error {
-	fmt.Printf("Debug: Attempting to switch to mindmap '%s'\n", name)
 	if !mm.mindMapExists(name) {
 		return fmt.Errorf("mindmap '%s' does not exist", name)
 	}
@@ -190,7 +192,6 @@ func (mm *MindMapManager) SwitchMindMap(name string) error {
 	if !hasPermission {
 		return fmt.Errorf("user %s does not have permission to access mindmap '%s'", mm.CurrentUser, name)
 	}
-	fmt.Printf("Debug: User '%s' has permission to access mindmap '%s'\n", mm.CurrentUser, name)
 
 	// Load nodes for the switched mindmap
 	if err := mm.loadNodesForMindMap(name); err != nil {
@@ -198,13 +199,11 @@ func (mm *MindMapManager) SwitchMindMap(name string) error {
 	}
 
 	mm.CurrentMindMap = mm.MindMaps[name]
-	fmt.Printf("Debug: Switched to mindmap '%s'\n", name)
 
 	return nil
 }
 
 func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.Node) error {
-	fmt.Printf("Debug: Building tree from %d nodes\n", len(nodes))
 	for _, node := range nodes {
 		mindmap.Nodes[node.Index] = node
 		if node.Index > mindmap.MaxIndex {
@@ -214,7 +213,6 @@ func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.N
 
 		if node.ParentID == -1 {
 			mindmap.Root = node
-			fmt.Printf("Debug: Set root node - Index: %d, Content: %s\n", node.Index, node.Content)
 		}
 	}
 
@@ -230,7 +228,6 @@ func (mm *MindMapManager) buildTreeFromNodes(mindmap *MindMap, nodes []*models.N
 				return fmt.Errorf("parent node %d not found for node %d", node.ParentID, node.Index)
 			}
 			parent.Children = append(parent.Children, node)
-			fmt.Printf("Debug: Added node %d to parent %d\n", node.Index, parent.Index)
 		}
 	}
 
@@ -299,23 +296,6 @@ func (mm *MindMapManager) LoadNodes(mindmapName string) error {
 	return nil
 }
 
-func (mm *MindMapManager) validateAndUpdateLogicalIndices(node *models.Node, parentIndex string) {
-	for i, child := range node.Children {
-		expectedIndex := fmt.Sprintf("%s%d", parentIndex, i+1)
-		if child.LogicalIndex != expectedIndex {
-			fmt.Printf("Correcting logical index for node %d: %s -> %s\n",
-				child.Index, child.LogicalIndex, expectedIndex)
-			child.LogicalIndex = expectedIndex
-			// Update the database with the corrected logical index
-			err := mm.Store.UpdateNodeOrder(mm.CurrentMindMap.Root.Content, mm.CurrentUser, child.Index, child.LogicalIndex)
-			if err != nil {
-				fmt.Printf("Error updating logical index in database: %v\n", err)
-			}
-		}
-		mm.validateAndUpdateLogicalIndices(child, child.LogicalIndex+".")
-	}
-}
-
 func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
 	if node == mm.Root {
 		node.LogicalIndex = "0"
@@ -324,7 +304,6 @@ func (mm *MindMap) assignLogicalIndex(node *models.Node, prefix string) {
 
 	for i, child := range node.Children {
 		child.LogicalIndex = fmt.Sprintf("%s%d", prefix, i+1)
-		fmt.Printf("Assigned LogicalIndex %s to node %s\n", child.LogicalIndex, child.Content)
 		mm.assignLogicalIndex(child, child.LogicalIndex+".")
 	}
 }
@@ -355,83 +334,64 @@ func (mm *MindMapManager) findNodeByLogicalIndex(logicalIndex string) (*models.N
 	return currentNode, nil
 }
 
-func (mm *MindMapManager) Show(logicalIndex string, showIndex bool) error {
+func (mm *MindMapManager) Show(logicalIndex string, showIndex bool) ([]string, error) {
+	var output []string
+
 	if err := mm.ensureCurrentMindMap(); err != nil {
-		return err
+		return nil, err
 	}
 
 	if mm.CurrentMindMap.Root == nil {
-		return fmt.Errorf("current mindmap is empty or not properly initialized")
+		return nil, fmt.Errorf("current mindmap is empty or not properly initialized")
 	}
 
 	var node *models.Node
 
 	if logicalIndex == "" {
 		node = mm.CurrentMindMap.Root
-		fmt.Printf("Showing entire mind map from root: Index=%d, Content='%s'\n", node.Index, node.Content)
 	} else {
 		var err error
 		node, err = mm.findNodeByLogicalIndex(logicalIndex)
 		if err != nil {
-			return fmt.Errorf("failed to find node: %v", err)
-		}
-		fmt.Printf("Showing subtree from node: Index=%d, Content='%s', LogicalIndex='%s'\n", node.Index, node.Content, node.LogicalIndex)
-	}
-
-	fmt.Println("Mind Map Structure:")
-	if err := mm.visualize(node, "", true, showIndex); err != nil {
-		return fmt.Errorf("failed to visualize mind map: %v", err)
-	}
-
-	return nil
-}
-
-func (mm *MindMapManager) checkParentChildRelationships() {
-	for _, node := range mm.CurrentMindMap.Nodes {
-		if node != mm.CurrentMindMap.Root {
-			parent, exists := mm.CurrentMindMap.Nodes[node.ParentID]
-			if !exists {
-				fmt.Printf("WARNING: Node %d (%s) has non-existent parent ID %d\n",
-					node.Index, node.Content, node.ParentID)
-			} else {
-				found := false
-				for _, child := range parent.Children {
-					if child == node {
-						found = true
-						break
-					}
-				}
-				if !found {
-					fmt.Printf("WARNING: Node %d (%s) is not in the children list of its parent %d (%s)\n",
-						node.Index, node.Content, parent.Index, parent.Content)
-				}
-			}
+			return nil, fmt.Errorf("failed to find node: %v", err)
 		}
 	}
+
+	output = append(output, "Mind Map Structure:")
+	visualOutput, err := mm.visualize(node, "", true, showIndex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to visualize mind map: %v", err)
+	}
+	output = append(output, visualOutput...)
+
+	return output, nil
 }
 
-func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast bool, showIndex bool) error {
+func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast bool, showIndex bool) ([]string, error) {
+	var output []string
+
 	if node == nil {
-		return fmt.Errorf("attempted to visualize a nil node")
+		return nil, fmt.Errorf("attempted to visualize a nil node")
 	}
 
 	var line strings.Builder
 
 	if node == mm.CurrentMindMap.Root {
-		line.WriteString(fmt.Sprintf("%s %s", node.LogicalIndex, node.Content))
+		line.WriteString(fmt.Sprintf("%s%s%s %s", ColorYellow, node.LogicalIndex, ColorDefault, node.Content))
 	} else {
+		line.WriteString(prefix)
 		if isLast {
-			line.WriteString(fmt.Sprintf("%s└── ", prefix))
-			prefix += "    "
+			line.WriteString(fmt.Sprintf("%s└── %s", ColorDarkBrown, ColorDefault))
+			prefix += fmt.Sprintf("%s    ", ColorDarkBrown)
 		} else {
-			line.WriteString(fmt.Sprintf("%s├── ", prefix))
-			prefix += "│   "
+			line.WriteString(fmt.Sprintf("%s├── %s", ColorDarkBrown, ColorDefault))
+			prefix += fmt.Sprintf("%s│   ", ColorDarkBrown)
 		}
-		line.WriteString(fmt.Sprintf("%s %s", node.LogicalIndex, node.Content))
+		line.WriteString(fmt.Sprintf("%s%s%s %s", ColorYellow, node.LogicalIndex, ColorDefault, node.Content))
 	}
 
 	if showIndex {
-		line.WriteString(fmt.Sprintf(" [%d]", node.Index))
+		line.WriteString(fmt.Sprintf(" %s[%d]%s", ColorOrange, node.Index, ColorDefault))
 	}
 
 	// Add extra fields
@@ -444,41 +404,52 @@ func (mm *MindMapManager) visualize(node *models.Node, prefix string, isLast boo
 		line.WriteString(" " + strings.Join(extraFields, ", "))
 	}
 
-	fmt.Println(line.String())
+	output = append(output, line.String())
 
-	// Sort children before visualizing
+	// Sort children based on their logical index
 	sort.Slice(node.Children, func(i, j int) bool {
-		return node.Children[i].LogicalIndex < node.Children[j].LogicalIndex
+		return compareLogicalIndexes(node.Children[i].LogicalIndex, node.Children[j].LogicalIndex)
 	})
 
 	for i, child := range node.Children {
-		err := mm.visualize(child, prefix, i == len(node.Children)-1, showIndex)
+		childOutput, err := mm.visualize(child, prefix, i == len(node.Children)-1, showIndex)
 		if err != nil {
-			return fmt.Errorf("error visualizing child node: %v", err)
+			return nil, fmt.Errorf("error visualizing child node: %v", err)
+		}
+		output = append(output, childOutput...)
+	}
+
+	return output, nil
+}
+
+// Helper function to compare logical indexes
+func compareLogicalIndexes(a, b string) bool {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+
+	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+		aNum, _ := strconv.Atoi(aParts[i])
+		bNum, _ := strconv.Atoi(bParts[i])
+		if aNum != bNum {
+			return aNum < bNum
 		}
 	}
 
-	return nil
+	return len(aParts) < len(bParts)
 }
 
 func (mm *MindMapManager) Undo() error {
-	mm.printOperationHistory()
-
 	if mm.historyIndex < 0 {
 		return fmt.Errorf("nothing to undo")
 	}
 
 	op := mm.history[mm.historyIndex]
-	fmt.Printf("Debug: Undoing operation type: %s\n", op.Type)
 
 	var err error
 	switch op.Type {
 	case OpAdd:
-		fmt.Printf("Debug: Undoing Add operation. Index: %d\n", op.AffectedNode.Index)
 		err = mm.DeleteNode(strconv.Itoa(op.AffectedNode.Index), true, false)
 	case OpDelete:
-		fmt.Printf("Debug: Undoing Delete operation. Index: %d, Content: %s\n", op.AffectedNode.Index, op.OldContent)
-		fmt.Printf("Debug: Undoing Delete operation. Index: %d, Content: %s\n", op.AffectedNode.Index, op.OldContent)
 		err = mm.restoreSubtree(op.DeletedTree, false)
 		if err != nil {
 			break
@@ -496,27 +467,21 @@ func (mm *MindMapManager) Undo() error {
 	}
 
 	mm.historyIndex--
-	mm.printOperationHistory()
 	return nil
 }
 
 func (mm *MindMapManager) Redo() error {
-	mm.printOperationHistory()
-
 	if mm.historyIndex >= len(mm.history)-1 {
 		return fmt.Errorf("nothing to redo")
 	}
 
 	op := mm.history[mm.historyIndex+1]
-	fmt.Printf("Debug: Redoing operation type: %s\n", op.Type)
 
 	var err error
 	switch op.Type {
 	case OpAdd:
-		fmt.Printf("Debug: Redoing Add operation. ParentID: %d, Content: %s\n", op.AffectedNode.ParentID, op.NewContent)
 		err = mm.AddNode(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true, op.AffectedNode.Index, false)
 	case OpDelete:
-		fmt.Printf("Debug: Redoing Delete operation. Index: %d\n", op.AffectedNode.Index)
 		err = mm.DeleteNode(strconv.Itoa(op.AffectedNode.Index), true, false)
 	case OpMove, OpInsert:
 		err = mm.MoveNode(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.NewParentID), true, false)
@@ -529,7 +494,6 @@ func (mm *MindMapManager) Redo() error {
 	}
 
 	mm.historyIndex++
-	mm.printOperationHistory()
 	return nil
 }
 
@@ -569,48 +533,9 @@ func (mm *MindMapManager) addToHistory(op Operation) {
 		mm.history = append(mm.history[:mm.historyIndex+1], op)
 		mm.historyIndex++
 	}
-
-	// Print operation history after modifying it
-	mm.printOperationHistory()
 }
 
 func (mm *MindMapManager) ClearOperationHistory() {
 	mm.history = []Operation{}
 	mm.historyIndex = -1
-}
-
-func (mm *MindMapManager) printOperationHistory() {
-	fmt.Printf("Operation History (length: %d, current index: %d):\n", len(mm.history), mm.historyIndex)
-	for i, op := range mm.history {
-		fmt.Printf("[%d] Type: %s, AffectedNode: {Index: %d, ParentID: %d}, OldContent: %s, NewContent: %s\n",
-			i, op.Type, op.AffectedNode.Index, op.AffectedNode.ParentID, op.OldContent, op.NewContent)
-
-		if len(op.OldExtra) > 0 {
-			fmt.Printf("    OldExtra: %v\n", op.OldExtra)
-		}
-		if len(op.NewExtra) > 0 {
-			fmt.Printf("    NewExtra: %v\n", op.NewExtra)
-		}
-
-		if op.Type == OpDelete && len(op.DeletedTree) > 0 {
-			fmt.Printf("    DeletedTree:\n")
-			mm.printDeletedSubtree(op.DeletedTree, "    ")
-		}
-
-		if op.Type == OpMove || op.Type == OpInsert {
-			fmt.Printf("    OldParentID: %d, NewParentID: %d\n", op.OldParentID, op.NewParentID)
-		}
-	}
-}
-
-func (mm *MindMapManager) printDeletedSubtree(nodes []*models.Node, indent string) {
-	for _, node := range nodes {
-		fmt.Printf("%s- Index: %d, Content: %s, LogicalIndex: %s\n", indent, node.Index, node.Content, node.LogicalIndex)
-		if len(node.Extra) > 0 {
-			fmt.Printf("%s  Extra: %v\n", indent, node.Extra)
-		}
-		if len(node.Children) > 0 {
-			mm.printDeletedSubtree(node.Children, indent+"  ")
-		}
-	}
 }
