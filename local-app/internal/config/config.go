@@ -8,8 +8,11 @@ import (
 )
 
 type Config struct {
-	DatabasePath string `json:"database_path"`
-	HistoryFile  string `json:"history_file"`
+	DatabaseDir  string `json:"database_dir"`
+	DatabaseFile string `json:"database_file"`
+	LogFolder    string `json:"log_folder"`
+	CommandLog   string `json:"command_log"`
+	ErrorLog     string `json:"error_log"`
 }
 
 var (
@@ -27,8 +30,11 @@ func LoadConfig() error {
 	// Check if the config file exists, if not create a default one
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		defaultConfig := &Config{
-			DatabasePath: "./data/mindnoscape.db",
-			HistoryFile:  "./tmp/mindnoscape_history.txt",
+			DatabaseDir:  "./data",
+			DatabaseFile: "mindnoscape.db",
+			LogFolder:    "./log",
+			CommandLog:   "commands.log",
+			ErrorLog:     "errors.log",
 		}
 		if err := SaveConfig(defaultConfig); err != nil {
 			return fmt.Errorf("failed to create default config: %v", err)

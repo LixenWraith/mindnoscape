@@ -64,7 +64,7 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 
 	for _, node := range nodes {
 		nodeMap[node.Index] = node
-		if node.Index == 0 || node.LogicalIndex == "0" {
+		if node.Index == 0 || node.ParentID == -1 || node.LogicalIndex == "0" {
 			root = node
 		}
 	}
@@ -89,7 +89,7 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 func SaveToFile(store Store, mindmapName string, username string, filename string, format string) error {
 	nodes, err := store.GetAllNodesForMindmap(mindmapName, username)
 	if err != nil {
-		return fmt.Errorf("failed to get all nodes for mindmap '%s': %v", mindmapName, err)
+		return fmt.Errorf("failed to get all nodes for data '%s': %v", mindmapName, err)
 	}
 
 	root, err := buildTreeFromNodes(nodes)
@@ -112,23 +112,23 @@ func LoadFromFile(store Store, mindmapName string, username string, filename str
 		return err
 	}
 
-	// Check if the mindmap exists
+	// Check if the data exists
 	exists, err := store.MindmapExists(mindmapName, username)
 	if err != nil {
-		return fmt.Errorf("failed to check if mindmap exists: %v", err)
+		return fmt.Errorf("failed to check if data exists: %v", err)
 	}
 
-	// If the mindmap doesn't exist, create it
+	// If the data doesn't exist, create it
 	if !exists {
 		_, err = store.AddMindmap(mindmapName, username, false) // Use username and set isPublic to false
 		if err != nil {
-			return fmt.Errorf("failed to create mindmap: %v", err)
+			return fmt.Errorf("failed to create data: %v", err)
 		}
 	}
 
 	// Insert new data
 	if err := insertNodeRecursive(store, mindmapName, root, -1); err != nil {
-		return fmt.Errorf("failed to insert nodes for mindmap '%s': %v", mindmapName, err)
+		return fmt.Errorf("failed to insert nodes for data '%s': %v", mindmapName, err)
 	}
 
 	return nil

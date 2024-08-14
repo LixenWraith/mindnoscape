@@ -1,28 +1,37 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
-	_ "log"
 	"os"
-
-	"github.com/chzyer/readline"
-	_ "github.com/mattn/go-sqlite3"
+	"os/signal"
+	"syscall"
 
 	"mindnoscape/local-app/internal/cli"
 	"mindnoscape/local-app/internal/config"
-	"mindnoscape/local-app/internal/mindmap"
+	"mindnoscape/local-app/internal/data"
+	"mindnoscape/local-app/internal/log"
 	"mindnoscape/local-app/internal/storage"
 	"mindnoscape/local-app/internal/ui"
 )
 
-var db *sql.DB
-
 func main() {
+	// Set up channel to receive interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Goroutine and channel to handle interrupt signal and signal program exit
+	// Handles Ctrl+C when UI input is not active!
+	exitChan := make(chan struct{})
+	go func() {
+		<-sigChan
+		close(exitChan)
+	}()
+
+	// Initialize UI
 	UI := ui.NewUI(os.Stdout, true)
-	UI.Println("Welcome to Mindnoscape! Use 'help' for the list of commands.")
+	UI.Info("Welcome to Mindnoscape! Use 'help' for the list of commands.")
 
 	// Load configuration
 	if err := config.LoadConfig(); err != nil {
@@ -31,86 +40,80 @@ func main() {
 	}
 	cfg := config.GetConfig()
 
-	// Clear history
-	if err := func() error {
-		return os.WriteFile(cfg.HistoryFile, []byte{}, 0644)
-	}(); err != nil {
-		UI.Error(fmt.Sprintf("Failed to clear history file: %v", err))
-	}
-
-	var err error
-	// Initialize SQLite database using the path from config
-	db, err = sql.Open("sqlite3", cfg.DatabasePath)
+	// Initialize logger
+	logger, err := log.NewLogger(cfg.LogFolder, cfg.CommandLog, cfg.ErrorLog)
 	if err != nil {
-		UI.Error(fmt.Sprintf("Failed to open database: %v", err))
+		UI.Error(fmt.Sprintf("Failed to initialize logger: %v", err))
 		os.Exit(1)
 	}
-	defer cleanup()
+	defer func() {
+		if err := logger.Close(); err != nil {
+			UI.Error(fmt.Sprintf("Failed to close logger: %v", err))
+		}
+	}()
 
-	// Initialize storage
-	store, err := storage.NewSQLiteStore(db)
+	// Initialize SQLite database using the path from config
+	store, err := storage.NewSQLiteStore(cfg.DatabaseDir, cfg.DatabaseFile)
 	if err != nil {
 		UI.Error(fmt.Sprintf("Failed to initialize storage: %v", err))
 		os.Exit(1)
 	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			// Handle the error, e.g., log it or return it
+			UI.Error(fmt.Sprintf("Error closing storage: %v\n", err))
+		}
+	}()
 
-	// Initialize mindmap manager with the default user
-	mm, err := mindmap.NewMindmapManager(store, "guest")
+	// Ensures the default user 'guest' exists in the database
+	err = store.EnsureGuestUser()
 	if err != nil {
-		UI.Error(fmt.Sprintf("Failed to create mindmap manager: %v", err))
+		UI.Error(fmt.Sprintf("Failed to ensure guest user: %v", err))
 		os.Exit(1)
 	}
 
-	// Initialize readline with history file from config
-	rl, err := readline.NewEx(&readline.Config{
-		HistoryFile:     cfg.HistoryFile,
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
-	})
+	// Initialize data manager
+	dataManager, err := data.NewManager(store)
 	if err != nil {
-		UI.Error(fmt.Sprintf("Failed to initialize readline: %v", err))
+		UI.Error(fmt.Sprintf("Failed to create data manager: %v", err))
 		os.Exit(1)
 	}
-	defer rl.Close()
 
 	// Initialize CLI
-	cli := cli.NewCLI(mm, rl)
+	c, err := cli.NewCLI(dataManager, logger)
+	if err != nil {
+		UI.Error(fmt.Sprintf("Failed to initialize CLI: %v", err))
+		os.Exit(1)
+	}
 
 	// Check for script arguments
 	if len(os.Args) > 1 {
 		for _, scriptFile := range os.Args[1:] {
-			err := cli.ExecuteScript(scriptFile)
+			err := c.ExecuteScript(scriptFile)
 			if err != nil {
-				UI.Error(fmt.Sprintf("Error executing script %s: %v", scriptFile, err))
+				c.UI.Error(fmt.Sprintf("Error executing script %s: %v", scriptFile, err))
 			}
 		}
 	}
 
 	// Main loop
 	for {
-		err := cli.RunInteractive()
-		if err != nil {
-			if errors.Is(err, readline.ErrInterrupt) {
-				UI.Println("Use 'exit' or 'quit' to exit the program.")
-				continue
-			} else if errors.Is(err, io.EOF) {
-				break
-			} else if err.Error() == "exit requested: EOF" {
-				break
+		select {
+		case <-exitChan:
+			return
+		default:
+			err := c.RunInteractive()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					UI.Println("Goodbye!")
+					return
+				}
+				logErr := logger.LogError(fmt.Errorf("main: %s", err.Error()))
+				if logErr != nil {
+					UI.Error(fmt.Sprintf("Failed to log error: %v", logErr))
+				}
+				UI.Error(err.Error())
 			}
-			UI.Error(fmt.Sprintf("Error: %v", err))
 		}
 	}
-}
-
-func cleanup() {
-	UI := ui.NewUI(os.Stdout, true)
-	if db != nil {
-		UI.Println("Closing database connection...")
-		err := db.Close()
-		if err != nil {
-			UI.Error(fmt.Sprintf("Error closing database: %v", err))
-		}
-	}
-	UI.Println("Goodbye!")
 }

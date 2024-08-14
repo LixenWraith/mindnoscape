@@ -11,6 +11,8 @@ type MindmapInfo struct {
 }
 
 type Store interface {
+	// User operations
+	EnsureGuestUser() error
 	AddUser(username, hashedPassword string) error
 	DeleteUser(username string) error
 	UserExists(username string) (bool, error)
@@ -18,6 +20,7 @@ type Store interface {
 	ModifyUser(oldUsername, newUsername, newHashedPassword string) error
 	AuthenticateUser(username, password string) (bool, error)
 
+	// Mindmap operations
 	AddMindmap(name string, owner string, isPublic bool) (int, error)
 	DeleteMindmap(name string, username string) error
 	GetAllMindmaps(username string) ([]MindmapInfo, error)
@@ -25,6 +28,7 @@ type Store interface {
 	ModifyMindmapAccess(name string, username string, isPublic bool) error
 	HasMindmapPermission(mindmapName string, username string) (bool, error)
 
+	// Node operations
 	AddNode(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error
 	DeleteNode(mindmapName string, username string, id int) error
 	GetNode(mindmapName string, username string, id int) ([]*models.Node, error)
