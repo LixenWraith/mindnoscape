@@ -1,9 +1,11 @@
 package storage
 
 import (
-	"database/sql"
 	"fmt"
+
 	"mindnoscape/local-app/internal/models"
+
+	"database/sql"
 )
 
 type SQLiteNodeStorage struct {
@@ -14,7 +16,7 @@ func NewSQLiteNodeStorage(db *sql.DB) *SQLiteNodeStorage {
 	return &SQLiteNodeStorage{db: db}
 }
 
-func (ns *SQLiteNodeStorage) AddNode(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error {
+func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error {
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -61,7 +63,7 @@ func (ns *SQLiteNodeStorage) AddNode(mindmapName string, username string, parent
 	return tx.Commit()
 }
 
-func (ns *SQLiteNodeStorage) DeleteNode(mindmapName string, username string, id int) error {
+func (ns *SQLiteNodeStorage) NodeDelete(mindmapName string, username string, id int) error {
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -93,7 +95,7 @@ func (ns *SQLiteNodeStorage) DeleteNode(mindmapName string, username string, id 
 	return tx.Commit()
 }
 
-func (ns *SQLiteNodeStorage) GetNode(mindmapName string, username string, id int) ([]*models.Node, error) {
+func (ns *SQLiteNodeStorage) NodeGet(mindmapName string, username string, id int) ([]*models.Node, error) {
 	// Check permissions
 	var mindmapID int
 	err := ns.db.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&mindmapID)
@@ -127,7 +129,7 @@ func (ns *SQLiteNodeStorage) GetNode(mindmapName string, username string, id int
 	return []*models.Node{&node}, nil
 }
 
-func (ns *SQLiteNodeStorage) GetParentNode(mindmapName string, username string, id int) ([]*models.Node, error) {
+func (ns *SQLiteNodeStorage) NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error) {
 	// First, get the parent ID
 	var parentID int
 	err := ns.db.QueryRow(`
@@ -141,10 +143,10 @@ func (ns *SQLiteNodeStorage) GetParentNode(mindmapName string, username string, 
 	}
 
 	// Now get the parent node
-	return ns.GetNode(mindmapName, username, parentID)
+	return ns.NodeGet(mindmapName, username, parentID)
 }
 
-func (ns *SQLiteNodeStorage) GetAllNodesForMindmap(mindmapName string, username string) ([]*models.Node, error) {
+func (ns *SQLiteNodeStorage) NodeGetAll(mindmapName string, username string) ([]*models.Node, error) {
 	// Check permissions and get data ID
 	var mindmapID int
 	err := ns.db.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&mindmapID)
@@ -189,7 +191,7 @@ func (ns *SQLiteNodeStorage) GetAllNodesForMindmap(mindmapName string, username 
 	return nodes, nil
 }
 
-func (ns *SQLiteNodeStorage) ModifyNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
+func (ns *SQLiteNodeStorage) NodeModify(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -229,7 +231,7 @@ func (ns *SQLiteNodeStorage) ModifyNode(mindmapName string, username string, id 
 	return tx.Commit()
 }
 
-func (ns *SQLiteNodeStorage) MoveNode(mindmapName string, username string, sourceID, targetID int) error {
+func (ns *SQLiteNodeStorage) NodeMove(mindmapName string, username string, sourceID, targetID int) error {
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -255,7 +257,7 @@ func (ns *SQLiteNodeStorage) MoveNode(mindmapName string, username string, sourc
 	return tx.Commit()
 }
 
-func (ns *SQLiteNodeStorage) UpdateNodeOrder(mindmapName string, username string, nodeID int, logicalIndex string) error {
+func (ns *SQLiteNodeStorage) NodeOrderUpdate(mindmapName string, username string, nodeID int, logicalIndex string) error {
 	// Check permissions
 	var count int
 	err := ns.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)

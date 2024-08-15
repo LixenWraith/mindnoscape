@@ -1,8 +1,9 @@
 package storage
 
 import (
-	"database/sql"
 	"fmt"
+
+	"database/sql"
 )
 
 type SQLiteMindmapStorage struct {
@@ -13,8 +14,8 @@ func NewSQLiteMindmapStorage(db *sql.DB) *SQLiteMindmapStorage {
 	return &SQLiteMindmapStorage{db: db}
 }
 
-func (s *SQLiteMindmapStorage) AddMindmap(name string, owner string, isPublic bool) (int, error) {
-	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", name, owner, isPublic)
+func (s *SQLiteMindmapStorage) MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error) {
+	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", mindmapName, owner, isPublic)
 	if err != nil {
 		return 0, fmt.Errorf("failed to add data: %w", err)
 	}
@@ -27,7 +28,7 @@ func (s *SQLiteMindmapStorage) AddMindmap(name string, owner string, isPublic bo
 	return int(id), nil
 }
 
-func (s *SQLiteMindmapStorage) DeleteMindmap(name string, username string) error {
+func (s *SQLiteMindmapStorage) MindmapDelete(mindmapName string, username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -36,7 +37,7 @@ func (s *SQLiteMindmapStorage) DeleteMindmap(name string, username string) error
 
 	// Get the data ID
 	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", name, username).Scan(&mindmapID)
+	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
 	if err != nil {
 		return fmt.Errorf("failed to get data ID: %w", err)
 	}
@@ -60,7 +61,7 @@ func (s *SQLiteMindmapStorage) DeleteMindmap(name string, username string) error
 	return nil
 }
 
-func (s *SQLiteMindmapStorage) GetAllMindmaps(username string) ([]MindmapInfo, error) {
+func (s *SQLiteMindmapStorage) MindmapGetAll(username string) ([]MindmapInfo, error) {
 	rows, err := s.db.Query(`
 		SELECT m.name, m.is_public, m.owner 
 		FROM mindmaps m
@@ -87,62 +88,50 @@ func (s *SQLiteMindmapStorage) GetAllMindmaps(username string) ([]MindmapInfo, e
 	return mindmaps, nil
 }
 
-func (s *SQLiteMindmapStorage) MindmapExists(name string, username string) (bool, error) {
+func (s *SQLiteMindmapStorage) MindmapExists(mindmapName string, username string) (bool, error) {
 	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", name, username).Scan(&count)
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check data existence: %w", err)
 	}
 	return count > 0, nil
 }
 
-func (s *SQLiteMindmapStorage) ModifyMindmapAccess(name string, username string, isPublic bool) error {
-	result, err := s.db.Exec("UPDATE mindmaps SET is_public = ? WHERE name = ? AND owner = ?", isPublic, name, username)
+func (s *SQLiteMindmapStorage) MindmapPermission(mindmapName string, username string, setPublic ...bool) (bool, error) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to modify data access: %w", err)
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("no data found with name '%s' owned by '%s'", name, username)
-	}
-
-	return nil
-}
-
-func (s *SQLiteMindmapStorage) HasMindmapPermission(mindmapName string, username string) (bool, error) {
-	var count int
-	err := s.db.QueryRow(`
-		SELECT COUNT(*) 
-		FROM mindmaps 
-		WHERE name = ? AND (owner = ? OR is_public = 1)
-	`, mindmapName, username).Scan(&count)
-
-	if err != nil {
-		return false, fmt.Errorf("failed to check data permission: %w", err)
-	}
-
-	return count > 0, nil
-}
-
-func (s *SQLiteMindmapStorage) GetMindmapID(name string, username string) (int, error) {
-	var id int
-	err := s.db.QueryRow(`
-		SELECT id 
-		FROM mindmaps 
-		WHERE name = ? AND (owner = ? OR is_public = 1)
-	`, name, username).Scan(&id)
-
+	var isOwner bool
+	var isPublic bool
+	err = tx.QueryRow("SELECT owner = ?, is_public FROM mindmaps WHERE name = ?", username, mindmapName).Scan(&isOwner, &isPublic)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, fmt.Errorf("data not found or user doesn't have permission")
+			return false, fmt.Errorf("mindmap '%s' does not exist", mindmapName)
 		}
-		return 0, fmt.Errorf("failed to get data ID: %w", err)
+		return false, fmt.Errorf("failed to check mindmap permission: %w", err)
 	}
 
-	return id, nil
+	if len(setPublic) > 0 {
+		if !isOwner {
+			return false, fmt.Errorf("user '%s' does not have permission to modify mindmap '%s'", username, mindmapName)
+		}
+
+		newPublicStatus := setPublic[0]
+		if isPublic != newPublicStatus {
+			_, err = tx.Exec("UPDATE mindmaps SET is_public = ? WHERE name = ?", newPublicStatus, mindmapName)
+			if err != nil {
+				return false, fmt.Errorf("failed to update mindmap access: %w", err)
+			}
+			isPublic = newPublicStatus
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return isOwner || isPublic, nil
 }

@@ -13,28 +13,27 @@ type MindmapInfo struct {
 type Store interface {
 	// User operations
 	EnsureGuestUser() error
-	AddUser(username, hashedPassword string) error
-	DeleteUser(username string) error
+	UserAdd(username, hashedPassword string) error
+	UserDelete(username string) error
 	UserExists(username string) (bool, error)
-	GetUser(username string) (*models.User, error)
-	ModifyUser(oldUsername, newUsername, newHashedPassword string) error
-	AuthenticateUser(username, password string) (bool, error)
+	UserGet(username string) (*models.User, error)
+	UserModify(oldUsername, newUsername, newHashedPassword string) error
+	UserAuthenticate(username, password string) (bool, error)
 
 	// Mindmap operations
-	AddMindmap(name string, owner string, isPublic bool) (int, error)
-	DeleteMindmap(name string, username string) error
-	GetAllMindmaps(username string) ([]MindmapInfo, error)
-	MindmapExists(name string, username string) (bool, error)
-	ModifyMindmapAccess(name string, username string, isPublic bool) error
-	HasMindmapPermission(mindmapName string, username string) (bool, error)
+	MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error)
+	MindmapDelete(mindmapName string, username string) error
+	MindmapGetAll(mindmapName string) ([]MindmapInfo, error)
+	MindmapExists(mindmapName string, username string) (bool, error)
+	MindmapPermission(mindmapName string, username string, setPublic ...bool) (bool, error)
 
 	// Node operations
-	AddNode(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error
-	DeleteNode(mindmapName string, username string, id int) error
-	GetNode(mindmapName string, username string, id int) ([]*models.Node, error)
-	GetParentNode(mindmapName string, username string, id int) ([]*models.Node, error)
-	GetAllNodesForMindmap(mindmapName string, username string) ([]*models.Node, error)
-	ModifyNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error
-	MoveNode(mindmapName string, username string, sourceID, targetID int) error
-	UpdateNodeOrder(mindmapName string, username string, nodeID int, logicalIndex string) error
+	NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error
+	NodeDelete(mindmapName string, username string, id int) error
+	NodeGet(mindmapName string, username string, id int) ([]*models.Node, error)
+	NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error)
+	NodeGetAll(mindmapName string, username string) ([]*models.Node, error)
+	NodeModify(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error
+	NodeMove(mindmapName string, username string, sourceID, targetID int) error
+	NodeOrderUpdate(mindmapName string, username string, nodeID int, logicalIndex string) error
 }

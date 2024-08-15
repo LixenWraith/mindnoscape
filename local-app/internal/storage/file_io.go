@@ -87,7 +87,7 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 }
 
 func SaveToFile(store Store, mindmapName string, username string, filename string, format string) error {
-	nodes, err := store.GetAllNodesForMindmap(mindmapName, username)
+	nodes, err := store.NodeGetAll(mindmapName, username)
 	if err != nil {
 		return fmt.Errorf("failed to get all nodes for data '%s': %v", mindmapName, err)
 	}
@@ -120,7 +120,7 @@ func LoadFromFile(store Store, mindmapName string, username string, filename str
 
 	// If the data doesn't exist, create it
 	if !exists {
-		_, err = store.AddMindmap(mindmapName, username, false) // Use username and set isPublic to false
+		_, err = store.MindmapAdd(mindmapName, username, false) // Use username and set isPublic to false
 		if err != nil {
 			return fmt.Errorf("failed to create data: %v", err)
 		}
@@ -136,7 +136,7 @@ func LoadFromFile(store Store, mindmapName string, username string, filename str
 
 func insertNodeRecursive(store Store, mindmapName string, node *models.Node, parentID int) error {
 	// Use an empty string for username as this is used during import
-	err := store.AddNode(mindmapName, "", parentID, node.Content, node.Extra, node.LogicalIndex)
+	err := store.NodeAdd(mindmapName, "", parentID, node.Content, node.Extra, node.LogicalIndex)
 	if err != nil {
 		return err
 	}

@@ -11,15 +11,15 @@ import (
 
 // MindmapOperations defines the interface for data-related operations
 type MindmapOperations interface {
-	AddMindmap(name string, isPublic bool) error
-	DeleteMindmap(name string) error
-	ChangeMindmap(name string) error
-	ListMindmap() ([]storage.MindmapInfo, error)
-	LoadNodes(name string) error
-	ShowMindmap(logicalIndex string, showIndex bool) ([]string, error)
-	ModifyMindmapAccess(name string, isPublic bool) error
-	SaveMindmap(filename, format string) error
-	LoadMindmap(filename, format string) error
+	MindmapAdd(name string, isPublic bool) error
+	MindmapDelete(name string) error
+	MindmapSelect(name string) error
+	MindmapList() ([]storage.MindmapInfo, error)
+	NodeLoad(name string) error
+	MindmapView(logicalIndex string, showIndex bool) ([]string, error)
+	MindmapPermission(name string, isPublic bool) error
+	MindmapSave(filename, format string) error
+	MindmapLoad(filename, format string) error
 }
 
 type MindmapManager struct {
@@ -42,7 +42,7 @@ func NewMindmapManager(store storage.Store, username string) (*MindmapManager, e
 	mm.HistoryManager = NewHistoryManager(mm)
 
 	// Load existing mindmaps for the user
-	mindmaps, err := store.GetAllMindmaps(username)
+	mindmaps, err := store.MindmapGetAll(username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load mindmaps: %w", err)
 	}
@@ -59,7 +59,7 @@ func NewMindmapManager(store storage.Store, username string) (*MindmapManager, e
 	return mm, nil
 }
 
-func (mm *MindmapManager) ChangeUser(username string) error {
+func (mm *MindmapManager) UserSelect(username string) error {
 	mm.CurrentUser = username
 
 	// Clear current mindmaps
@@ -67,7 +67,7 @@ func (mm *MindmapManager) ChangeUser(username string) error {
 	mm.CurrentMindmap = nil
 
 	// Load mindmaps for the new user
-	mindmaps, err := mm.Store.GetAllMindmaps(username)
+	mindmaps, err := mm.Store.MindmapGetAll(username)
 	if err != nil {
 		return fmt.Errorf("failed to load mindmaps for user %s: %w", username, err)
 	}
@@ -86,7 +86,7 @@ func (mm *MindmapManager) ChangeUser(username string) error {
 	return nil
 }
 
-func (mm *MindmapManager) AddMindmap(name string, isPublic bool) error {
+func (mm *MindmapManager) MindmapAdd(name string, isPublic bool) error {
 	if mm.Mindmaps == nil {
 		mm.Mindmaps = make(map[string]*models.Mindmap)
 	}
@@ -96,7 +96,7 @@ func (mm *MindmapManager) AddMindmap(name string, isPublic bool) error {
 	}
 
 	// Add to storage and get the new MindmapID
-	mindmapID, err := mm.Store.AddMindmap(name, mm.CurrentUser, isPublic)
+	mindmapID, err := mm.Store.MindmapAdd(name, mm.CurrentUser, isPublic)
 	if err != nil {
 		return fmt.Errorf("failed to add data to storage: %w", err)
 	}
@@ -110,7 +110,7 @@ func (mm *MindmapManager) AddMindmap(name string, isPublic bool) error {
 	newMindmap.Root = root
 	newMindmap.Nodes[0] = root
 
-	if err := mm.Store.AddNode(name, mm.CurrentUser, -1, root.Content, root.Extra, root.LogicalIndex); err != nil {
+	if err := mm.Store.NodeAdd(name, mm.CurrentUser, -1, root.Content, root.Extra, root.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to add root node: %w", err)
 	}
 
@@ -120,12 +120,12 @@ func (mm *MindmapManager) AddMindmap(name string, isPublic bool) error {
 	return nil
 }
 
-func (mm *MindmapManager) DeleteMindmap(name string) error {
+func (mm *MindmapManager) MindmapDelete(name string) error {
 	if _, exists := mm.Mindmaps[name]; !exists {
 		return fmt.Errorf("data '%s' does not exist", name)
 	}
 
-	err := mm.Store.DeleteMindmap(name, mm.CurrentUser)
+	err := mm.Store.MindmapDelete(name, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to delete data from storage: %w", err)
 	}
@@ -139,14 +139,14 @@ func (mm *MindmapManager) DeleteMindmap(name string) error {
 	return nil
 }
 
-func (mm *MindmapManager) ChangeMindmap(name string) error {
+func (mm *MindmapManager) MindmapSelect(name string) error {
 	mindmap, exists := mm.Mindmaps[name]
 	if !exists {
 		return fmt.Errorf("data '%s' does not exist", name)
 	}
 
 	// Check if the user has permission to access this data
-	hasPermission, err := mm.Store.HasMindmapPermission(name, mm.CurrentUser)
+	hasPermission, err := mm.Store.MindmapPermission(name, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to check data permissions: %w", err)
 	}
@@ -155,7 +155,7 @@ func (mm *MindmapManager) ChangeMindmap(name string) error {
 	}
 
 	// Load nodes for the switched data
-	nodes, err := mm.Store.GetAllNodesForMindmap(name, mm.CurrentUser)
+	nodes, err := mm.Store.NodeGetAll(name, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to load nodes for data '%s': %w", name, err)
 	}
@@ -181,12 +181,12 @@ func (mm *MindmapManager) ChangeMindmap(name string) error {
 	return nil
 }
 
-func (mm *MindmapManager) ListMindmap() ([]storage.MindmapInfo, error) {
-	return mm.Store.GetAllMindmaps(mm.CurrentUser)
+func (mm *MindmapManager) MindmapList() ([]storage.MindmapInfo, error) {
+	return mm.Store.MindmapGetAll(mm.CurrentUser)
 }
 
-func (mm *MindmapManager) LoadNodes(mindmapName string) error {
-	nodes, err := mm.Store.GetAllNodesForMindmap(mindmapName, mm.CurrentUser)
+func (mm *MindmapManager) NodeLoad(mindmapName string) error {
+	nodes, err := mm.Store.NodeGetAll(mindmapName, mm.CurrentUser)
 	if err != nil {
 		return fmt.Errorf("failed to load nodes for data '%s': %w", mindmapName, err)
 	}
@@ -219,7 +219,7 @@ func (mm *MindmapManager) LoadNodes(mindmapName string) error {
 	return nil
 }
 
-func (mm *MindmapManager) ShowMindmap(logicalIndex string, showIndex bool) ([]string, error) {
+func (mm *MindmapManager) MindmapView(logicalIndex string, showIndex bool) ([]string, error) {
 	if mm.CurrentMindmap == nil {
 		return nil, fmt.Errorf("no data selected")
 	}
@@ -246,26 +246,41 @@ func (mm *MindmapManager) ShowMindmap(logicalIndex string, showIndex bool) ([]st
 	return output, nil
 }
 
-func (mm *MindmapManager) ModifyMindmapAccess(name string, isPublic bool) error {
+func (mm *MindmapManager) MindmapPermission(name string, username string, setPublic ...bool) (bool, error) {
 	mindmap, exists := mm.Mindmaps[name]
 	if !exists {
-		return fmt.Errorf("data '%s' does not exist", name)
+		return false, fmt.Errorf("mindmap '%s' does not exist", name)
 	}
 
-	if mindmap.Owner != mm.CurrentUser {
-		return fmt.Errorf("user %s does not have permission to modify data '%s'", mm.CurrentUser, name)
+	isOwner := mindmap.Owner == username
+
+	// If setPublic is provided, attempt to modify the mindmap's public status
+	if len(setPublic) > 0 {
+		if !isOwner {
+			return false, fmt.Errorf("user '%s' does not have permission to modify mindmap '%s'", username, name)
+		}
+
+		newPublicStatus := setPublic[0]
+		if mindmap.IsPublic != newPublicStatus {
+			hasPermission, err := mm.Store.MindmapPermission(name, username, newPublicStatus)
+			if err != nil {
+				return false, fmt.Errorf("failed to update mindmap access: %w", err)
+			}
+			mindmap.IsPublic = newPublicStatus
+			return hasPermission, nil
+		}
 	}
 
-	err := mm.Store.ModifyMindmapAccess(name, mm.CurrentUser, isPublic)
+	// Check permission without modifying
+	hasPermission, err := mm.Store.MindmapPermission(name, username)
 	if err != nil {
-		return fmt.Errorf("failed to update data access: %w", err)
+		return false, fmt.Errorf("failed to check mindmap permission: %w", err)
 	}
 
-	mindmap.IsPublic = isPublic
-	return nil
+	return hasPermission, nil
 }
 
-func (mm *MindmapManager) SaveMindmap(filename, format string) error {
+func (mm *MindmapManager) MindmapExport(filename, format string) error {
 	if mm.CurrentMindmap == nil {
 		return fmt.Errorf("no data selected")
 	}
@@ -278,7 +293,7 @@ func (mm *MindmapManager) SaveMindmap(filename, format string) error {
 	return nil
 }
 
-func (mm *MindmapManager) LoadMindmap(filename, format string) error {
+func (mm *MindmapManager) MindmapImport(filename, format string) error {
 	tempRoot, err := storage.ImportFromFile(filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to import data from file: %w", err)
@@ -292,14 +307,14 @@ func (mm *MindmapManager) LoadMindmap(filename, format string) error {
 
 	if exists {
 		// Delete existing data
-		err = mm.DeleteMindmap(mindmapName)
+		err = mm.MindmapDelete(mindmapName)
 		if err != nil {
 			return fmt.Errorf("failed to delete existing data: %w", err)
 		}
 	}
 
 	// Create new data
-	err = mm.AddMindmap(mindmapName, false) // Set isPublic to false by default
+	err = mm.MindmapAdd(mindmapName, false) // Set isPublic to false by default
 	if err != nil {
 		return fmt.Errorf("failed to create new data: %w", err)
 	}
@@ -311,7 +326,7 @@ func (mm *MindmapManager) LoadMindmap(filename, format string) error {
 	}
 
 	// Switch to the newly loaded data
-	return mm.ChangeMindmap(mindmapName)
+	return mm.MindmapSelect(mindmapName)
 }
 
 // Helper functions

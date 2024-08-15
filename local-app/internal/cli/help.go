@@ -27,7 +27,7 @@ func (c *CLI) HandleHelp(args []string) error {
 }
 
 func (c *CLI) showGeneralHelp() error {
-	c.UI.Println("Command syntax: <scope> <operation> [arguments] [options]")
+	c.UI.Println("Command syntax: <scope> [operation] [arguments] [options]")
 	c.UI.Println("\nAvailable commands:")
 
 	currentScope := ""
@@ -138,30 +138,30 @@ var commandHelps = []CommandHelp{
 	},
 	{
 		Scope:     "mindmap",
-		Operation: "access",
-		ShortDesc: "Modify mindmap access",
-		LongDesc:  "Changes the access level of a mindmap to public or private.",
-		Syntax:    "mindmap access <mindmap_name> <public|private>",
-		Arguments: []string{"mindmap_name: The name of the mindmap", "access: 'public' or 'private'"},
-		Examples:  []string{"mindmap access my_ideas public", "mindmap access project_x private"},
+		Operation: "permission",
+		ShortDesc: "Modify mindmap permission",
+		LongDesc:  "Changes the permission of a mindmap to public or private.",
+		Syntax:    "mindmap permission <mindmap_name> <public|private>",
+		Arguments: []string{"mindmap_name: The name of the mindmap", "permission: 'public' or 'private'"},
+		Examples:  []string{"mindmap permission my_ideas public", "mindmap permission project_x private"},
 	},
 	{
 		Scope:     "mindmap",
-		Operation: "load",
-		ShortDesc: "Load a mindmap from a file",
-		LongDesc:  "Loads a mindmap from a file in JSON or XML format.",
+		Operation: "import",
+		ShortDesc: "Import a mindmap from a file",
+		LongDesc:  "Imports a mindmap from a file in JSON or XML format.",
 		Syntax:    "mindmap load <filename> [json|xml]",
-		Arguments: []string{"filename: The name of the file to load from", "format: (Optional) The file format, either 'json' or 'xml'. Defaults to 'json'"},
-		Examples:  []string{"mindmap load my_ideas.json", "mindmap load project_x.xml xml"},
+		Arguments: []string{"filename: The name of the file to import from", "format: (Optional) The file format, either 'json' or 'xml'. Defaults to 'json'"},
+		Examples:  []string{"mindmap import my_ideas.json", "mindmap import project_x.xml xml"},
 	},
 	{
 		Scope:     "mindmap",
-		Operation: "save",
-		ShortDesc: "Save a mindmap to a file",
-		LongDesc:  "Saves the current mindmap to a file in JSON or XML format.",
-		Syntax:    "mindmap save <filename> [json|xml]",
+		Operation: "export",
+		ShortDesc: "Export a mindmap to a file",
+		LongDesc:  "Exports the current mindmap to a file in JSON or XML format.",
+		Syntax:    "mindmap export <filename> [json|xml]",
 		Arguments: []string{"filename: The name of the file to save to", "format: (Optional) The file format, either 'json' or 'xml'. Defaults to 'json'"},
-		Examples:  []string{"mindmap save my_ideas.json", "mindmap save project_x.xml xml"},
+		Examples:  []string{"mindmap export my_ideas.json", "mindmap export project_x.xml xml"},
 	},
 	{
 		Scope:     "mindmap",
@@ -176,7 +176,7 @@ var commandHelps = []CommandHelp{
 		Scope:     "mindmap",
 		Operation: "list",
 		ShortDesc: "List available mindmaps",
-		LongDesc:  "Displays a list of all mindmaps accessible to the current user.",
+		LongDesc:  "Displays a list of all mindmaps permission to the current user.",
 		Syntax:    "mindmap list",
 		Examples:  []string{"mindmap list"},
 	},

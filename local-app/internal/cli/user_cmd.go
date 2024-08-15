@@ -28,7 +28,7 @@ func (c *CLI) UserAdd(args []string) error {
 		}
 	}
 
-	err = c.Data.UserManager.CreateUser(username, password)
+	err = c.Data.UserManager.UserAdd(username, password)
 	if err != nil {
 		return err
 	}
@@ -37,8 +37,8 @@ func (c *CLI) UserAdd(args []string) error {
 	return nil
 }
 
-// UserMod handles the 'user mod' command
-func (c *CLI) UserMod(args []string) error {
+// UserModify handles the 'user mod' command
+func (c *CLI) UserModify(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: user mod <username> [new_username] [new_password]")
 	}
@@ -65,7 +65,7 @@ func (c *CLI) UserMod(args []string) error {
 		}
 	}
 
-	err = c.Data.UserManager.ModifyUser(username, newUsername, newPassword)
+	err = c.Data.UserManager.UserModify(username, newUsername, newPassword)
 	if err != nil {
 		return err
 	}
@@ -74,8 +74,8 @@ func (c *CLI) UserMod(args []string) error {
 	return nil
 }
 
-// UserDel handles the 'user del' command
-func (c *CLI) UserDel(args []string) error {
+// UserDelete handles the 'user del' command
+func (c *CLI) UserDelete(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: user del <username>")
 	}
@@ -86,7 +86,7 @@ func (c *CLI) UserDel(args []string) error {
 		return err
 	}
 
-	authenticated, err := c.Data.UserManager.AuthenticateUser(username, password)
+	authenticated, err := c.Data.UserManager.UserAuthenticate(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
 	}
@@ -94,7 +94,7 @@ func (c *CLI) UserDel(args []string) error {
 		return fmt.Errorf("invalid username or password")
 	}
 
-	err = c.Data.UserManager.DeleteUser(username)
+	err = c.Data.UserManager.UserDelete(username)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func (c *CLI) UserSelect(args []string) error {
 		}
 	}
 
-	authenticated, err := c.Data.UserManager.AuthenticateUser(username, password)
+	authenticated, err := c.Data.UserManager.UserAuthenticate(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
 	}
@@ -150,7 +150,7 @@ func (c *CLI) UserList(args []string) error {
 // ExecuteUserCommand routes the user command to the appropriate handler
 func (c *CLI) ExecuteUserCommand(args []string) error {
 	if len(args) == 0 {
-		return c.MindmapInfo(args)
+		return c.UserInfo(args)
 	}
 
 	operation := args[0]
@@ -158,9 +158,9 @@ func (c *CLI) ExecuteUserCommand(args []string) error {
 	case "add":
 		return c.UserAdd(args[1:])
 	case "mod":
-		return c.UserMod(args[1:])
+		return c.UserModify(args[1:])
 	case "del":
-		return c.UserDel(args[1:])
+		return c.UserDelete(args[1:])
 	case "select":
 		return c.UserSelect(args[1:])
 	case "list":

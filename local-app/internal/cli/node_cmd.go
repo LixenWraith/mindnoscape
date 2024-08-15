@@ -44,7 +44,7 @@ func (c *CLI) NodeAdd(args []string) error {
 		}
 	}
 
-	err := c.Data.NodeManager.AddNode(parentIdentifier, content, extra, useIndex)
+	err := c.Data.NodeManager.NodeAdd(parentIdentifier, content, extra, useIndex)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (c *CLI) NodeAdd(args []string) error {
 }
 
 // NodeMod handles the 'node mod' command
-func (c *CLI) NodeMod(args []string) error {
+func (c *CLI) NodeModify(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: node mod <node> <content> [<extra field label>:<extra field value>]... [--index]")
 	}
@@ -76,7 +76,7 @@ func (c *CLI) NodeMod(args []string) error {
 		}
 	}
 
-	err := c.Data.NodeManager.ModifyNode(identifier, content, extra, useIndex)
+	err := c.Data.NodeManager.NodeModify(identifier, content, extra, useIndex)
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (c *CLI) NodeMove(args []string) error {
 		useIndex = true
 	}
 
-	err := c.Data.NodeManager.MoveNode(sourceIdentifier, targetIdentifier, useIndex)
+	err := c.Data.NodeManager.NodeMove(sourceIdentifier, targetIdentifier, useIndex)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func (c *CLI) NodeMove(args []string) error {
 }
 
 // NodeDel handles the 'node del' command
-func (c *CLI) NodeDel(args []string) error {
+func (c *CLI) NodeDelete(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: node del <node> [--index]")
 	}
@@ -123,7 +123,7 @@ func (c *CLI) NodeDel(args []string) error {
 		useIndex = true
 	}
 
-	err := c.Data.NodeManager.DeleteNode(identifier, useIndex)
+	err := c.Data.NodeManager.NodeDelete(identifier, useIndex)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (c *CLI) NodeFind(args []string) error {
 		query = query[1 : len(query)-1]
 	}
 
-	output, err := c.Data.NodeManager.FindNode(query, showIndex)
+	output, err := c.Data.NodeManager.NodeFind(query, showIndex)
 	if err != nil {
 		return fmt.Errorf("failed to find nodes: %v", err)
 	}
@@ -196,7 +196,7 @@ func (c *CLI) NodeSort(args []string) error {
 			}
 		}
 	}
-	err := c.Data.NodeManager.SortNode(identifier, field, reverse, useIndex)
+	err := c.Data.NodeManager.NodeSort(identifier, field, reverse, useIndex)
 	if err != nil {
 		return err
 	}
@@ -205,8 +205,8 @@ func (c *CLI) NodeSort(args []string) error {
 }
 
 // NodeLink handles the 'node link' command (placeholder)
-func (c *CLI) NodeLink(args []string) error {
-	c.UI.Info("Node linking functionality is not implemented yet.")
+func (c *CLI) NodeConnect(args []string) error {
+	c.UI.Info("Node connection functionality is not implemented yet.")
 	return nil
 }
 
@@ -221,11 +221,11 @@ func (c *CLI) ExecuteNodeCommand(args []string) error {
 	case "add":
 		return c.NodeAdd(args[1:])
 	case "mod":
-		return c.NodeMod(args[1:])
+		return c.NodeModify(args[1:])
 	case "move":
 		return c.NodeMove(args[1:])
 	case "del":
-		return c.NodeDel(args[1:])
+		return c.NodeDelete(args[1:])
 	case "find":
 		return c.NodeFind(args[1:])
 	case "view":
@@ -235,7 +235,7 @@ func (c *CLI) ExecuteNodeCommand(args []string) error {
 	case "sort":
 		return c.NodeSort(args[1:])
 	case "link":
-		return c.NodeLink(args[1:])
+		return c.NodeConnect(args[1:])
 	default:
 		return fmt.Errorf("unknown node operation: %s", operation)
 	}

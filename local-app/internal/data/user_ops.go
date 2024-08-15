@@ -2,19 +2,16 @@ package data
 
 import (
 	"fmt"
-
-	"mindnoscape/local-app/internal/storage"
 )
 
 // UserOperations defines the interface for user-related operations
 type UserOperations interface {
-	CreateUser(username, password string) error
-	DeleteUser(username string) error
-	ModifyUser(oldUsername, newUsername, newPassword string) error
-	AuthenticateUser(username, password string) (bool, error)
-	ChangeUser(username string) error
-	GetCurrentUser() string
-	GetUserMindmaps(username string) ([]storage.MindmapInfo, error)
+	UserAdd(username, password string) error
+	UserDelete(username string) error
+	UserModify(oldUsername, newUsername, newPassword string) error
+	UserAuthenticate(username, password string) (bool, error)
+	UserSelect(username string) error
+	UserGet() string
 }
 
 type UserManager struct {
@@ -28,7 +25,7 @@ func NewUserManager(mm *MindmapManager) *UserManager {
 // Ensure UserManager implements UserOperations
 var _ UserOperations = (*UserManager)(nil)
 
-func (um *UserManager) CreateUser(username, password string) error {
+func (um *UserManager) UserAdd(username, password string) error {
 	exists, err := um.mm.Store.UserExists(username)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
@@ -37,7 +34,7 @@ func (um *UserManager) CreateUser(username, password string) error {
 		return fmt.Errorf("user '%s' already exists", username)
 	}
 
-	err = um.mm.Store.AddUser(username, password)
+	err = um.mm.Store.UserAdd(username, password)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
@@ -45,7 +42,7 @@ func (um *UserManager) CreateUser(username, password string) error {
 	return nil
 }
 
-func (um *UserManager) DeleteUser(username string) error {
+func (um *UserManager) UserDelete(username string) error {
 	// Check if the user exists
 	exists, err := um.mm.Store.UserExists(username)
 	if err != nil {
@@ -56,7 +53,7 @@ func (um *UserManager) DeleteUser(username string) error {
 	}
 
 	// Delete user and their mindmaps
-	err = um.mm.Store.DeleteUser(username)
+	err = um.mm.Store.UserDelete(username)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
@@ -64,13 +61,13 @@ func (um *UserManager) DeleteUser(username string) error {
 	// If the deleted user was the current user, switch to guest
 	if um.mm.CurrentUser == username {
 		um.mm.CurrentUser = "guest"
-		_ = um.ChangeUser("guest")
+		_ = um.UserSelect("guest")
 	}
 
 	return nil
 }
 
-func (um *UserManager) ModifyUser(oldUsername, newUsername, newPassword string) error {
+func (um *UserManager) UserModify(oldUsername, newUsername, newPassword string) error {
 	// Check if the old username exists
 	exists, err := um.mm.Store.UserExists(oldUsername)
 	if err != nil {
@@ -91,7 +88,7 @@ func (um *UserManager) ModifyUser(oldUsername, newUsername, newPassword string) 
 		}
 	}
 
-	err = um.mm.Store.ModifyUser(oldUsername, newUsername, newPassword)
+	err = um.mm.Store.UserModify(oldUsername, newUsername, newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
@@ -104,15 +101,15 @@ func (um *UserManager) ModifyUser(oldUsername, newUsername, newPassword string) 
 	return nil
 }
 
-func (um *UserManager) AuthenticateUser(username, password string) (bool, error) {
-	authenticated, err := um.mm.Store.AuthenticateUser(username, password)
+func (um *UserManager) UserAuthenticate(username, password string) (bool, error) {
+	authenticated, err := um.mm.Store.UserAuthenticate(username, password)
 	if err != nil {
 		return false, fmt.Errorf("authentication error: %w", err)
 	}
 	return authenticated, nil
 }
 
-func (um *UserManager) ChangeUser(username string) error {
+func (um *UserManager) UserSelect(username string) error {
 	// Check if the user exists
 	exists, err := um.mm.Store.UserExists(username)
 	if err != nil {
@@ -123,7 +120,7 @@ func (um *UserManager) ChangeUser(username string) error {
 	}
 
 	// Change user in MindmapManager
-	err = um.mm.ChangeUser(username)
+	err = um.mm.UserSelect(username)
 	if err != nil {
 		return fmt.Errorf("failed to change user: %w", err)
 	}
@@ -131,14 +128,6 @@ func (um *UserManager) ChangeUser(username string) error {
 	return nil
 }
 
-func (um *UserManager) GetCurrentUser() string {
+func (um *UserManager) UserGet() string {
 	return um.mm.CurrentUser
-}
-
-func (um *UserManager) GetUserMindmaps(username string) ([]storage.MindmapInfo, error) {
-	mindmaps, err := um.mm.Store.GetAllMindmaps(username)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve user mindmaps: %w", err)
-	}
-	return mindmaps, nil
 }

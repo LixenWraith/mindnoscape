@@ -45,7 +45,7 @@ func (c *CLI) MindmapAdd(args []string) error {
 
 	name := args[0]
 	isPublic := c.CurrentUser == "guest"
-	err := c.Data.MindmapManager.AddMindmap(name, isPublic)
+	err := c.Data.MindmapManager.MindmapAdd(name, isPublic)
 	if err != nil {
 		return err
 	}
@@ -55,16 +55,16 @@ func (c *CLI) MindmapAdd(args []string) error {
 }
 
 // MindmapMod handles the 'mindmap mod' command (placeholder)
-func (c *CLI) MindmapMod(args []string) error {
+func (c *CLI) MindmapModify(args []string) error {
 	c.UI.Info("Mindmap modification functionality is not implemented yet.")
 	return nil
 }
 
 // MindmapDel handles the 'mindmap del' command
-func (c *CLI) MindmapDel(args []string) error {
+func (c *CLI) MindmapDelete(args []string) error {
 	if len(args) == 0 {
 		// Clear all mindmaps owned by the current user
-		mindmaps, err := c.Data.MindmapManager.ListMindmap()
+		mindmaps, err := c.Data.MindmapManager.MindmapList()
 		if err != nil {
 			return fmt.Errorf("failed to get mindmaps: %v", err)
 		}
@@ -72,7 +72,7 @@ func (c *CLI) MindmapDel(args []string) error {
 		clearedCount := 0
 		for _, mm := range mindmaps {
 			if mm.Owner == c.CurrentUser {
-				err := c.Data.MindmapManager.DeleteMindmap(mm.Name)
+				err := c.Data.MindmapManager.MindmapDelete(mm.Name)
 				if err != nil {
 					return fmt.Errorf("failed to delete mindmap '%s': %v", mm.Name, err)
 				}
@@ -84,7 +84,7 @@ func (c *CLI) MindmapDel(args []string) error {
 	} else {
 		// Delete a specific mindmap
 		mindmapName := args[0]
-		err := c.Data.MindmapManager.DeleteMindmap(mindmapName)
+		err := c.Data.MindmapManager.MindmapDelete(mindmapName)
 		if err != nil {
 			return fmt.Errorf("failed to delete mindmap '%s': %v", mindmapName, err)
 		}
@@ -96,35 +96,58 @@ func (c *CLI) MindmapDel(args []string) error {
 	return nil
 }
 
-// MindmapAccess handles the 'mindmap access' command
-func (c *CLI) MindmapAccess(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("usage: mindmap access <mindmap name> <public|private>")
+// MindmapPermission handles the 'mindmap permission' command
+func (c *CLI) MindmapPermission(args []string) error {
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("usage: mindmap permission <mindmap name> [public|private]")
 	}
 
 	mindmapName := args[0]
-	access := args[1]
 
-	isPublic := false
-	if access == "public" {
-		isPublic = true
-	} else if access != "private" {
-		return fmt.Errorf("invalid access option: use 'public' or 'private'")
+	// Check permission
+	if len(args) == 1 {
+		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, c.CurrentUser)
+		if err != nil {
+			return fmt.Errorf("failed to check mindmap permission: %v", err)
+		}
+
+		if hasPermission {
+			c.UI.Success(fmt.Sprintf("You have permission to access mindmap '%s'", mindmapName))
+		} else {
+			c.UI.Info(fmt.Sprintf("You don't have permission to access mindmap '%s'", mindmapName))
+		}
+		return nil
 	}
 
-	err := c.Data.MindmapManager.ModifyMindmapAccess(mindmapName, isPublic)
+	// Set permission
+	access := args[1]
+	var isPublic bool
+	switch access {
+	case "public":
+		isPublic = true
+	case "private":
+		isPublic = false
+	default:
+		return fmt.Errorf("invalid permission option: use 'public' or 'private'")
+	}
+
+	hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, c.CurrentUser, isPublic)
 	if err != nil {
 		return fmt.Errorf("failed to update mindmap access: %v", err)
+	}
+
+	if !hasPermission {
+		return fmt.Errorf("you don't have permission to modify access for mindmap '%s'", mindmapName)
 	}
 
 	c.UI.Success(fmt.Sprintf("Mindmap '%s' access set to %s", mindmapName, access))
 	return nil
 }
 
-// MindmapLoad handles the 'mindmap load' command
-func (c *CLI) MindmapLoad(args []string) error {
+// MindmapImport handles the 'mindmap import' command
+func (c *CLI) MindmapImport(args []string) error {
 	if len(args) < 1 || len(args) > 2 {
-		return fmt.Errorf("usage: mindmap load <filename> [json|xml]")
+		return fmt.Errorf("usage: mindmap import <filename> [json|xml]")
 	}
 
 	filename := args[0]
@@ -133,7 +156,7 @@ func (c *CLI) MindmapLoad(args []string) error {
 		format = args[1]
 	}
 
-	err := c.Data.MindmapManager.LoadMindmap(filename, format)
+	err := c.Data.MindmapManager.MindmapImport(filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to load mindmap: %v", err)
 	}
@@ -142,10 +165,10 @@ func (c *CLI) MindmapLoad(args []string) error {
 	return nil
 }
 
-// MindmapSave handles the 'mindmap save' command
-func (c *CLI) MindmapSave(args []string) error {
+// MindmapExport handles the 'mindmap export' command
+func (c *CLI) MindmapExport(args []string) error {
 	if len(args) < 1 || len(args) > 2 {
-		return fmt.Errorf("usage: mindmap save <filename> [json|xml]")
+		return fmt.Errorf("usage: mindmap export <filename> [json|xml]")
 	}
 
 	filename := args[0]
@@ -154,7 +177,7 @@ func (c *CLI) MindmapSave(args []string) error {
 		format = args[1]
 	}
 
-	err := c.Data.MindmapManager.SaveMindmap(filename, format)
+	err := c.Data.MindmapManager.MindmapExport(filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to save mindmap: %v", err)
 	}
@@ -176,7 +199,7 @@ func (c *CLI) MindmapSelect(args []string) error {
 	}
 
 	name := args[0]
-	err := c.Data.MindmapManager.ChangeMindmap(name)
+	err := c.Data.MindmapManager.MindmapSelect(name)
 	if err != nil {
 		return err
 	}
@@ -188,7 +211,7 @@ func (c *CLI) MindmapSelect(args []string) error {
 
 // MindmapList handles the 'mindmap list' command
 func (c *CLI) MindmapList(args []string) error {
-	mindmaps, err := c.Data.MindmapManager.ListMindmap()
+	mindmaps, err := c.Data.MindmapManager.MindmapList()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve mindmaps: %v", err)
 	}
@@ -229,7 +252,7 @@ func (c *CLI) MindmapView(args []string) error {
 		}
 	}
 
-	output, err := c.Data.MindmapManager.ShowMindmap(logicalIndex, showIndex)
+	output, err := c.Data.MindmapManager.MindmapView(logicalIndex, showIndex)
 	if err != nil {
 		return err
 	}
@@ -289,9 +312,9 @@ func (c *CLI) printColoredLine(line string) {
 	c.UI.Println("") // New line at the end
 }
 
-// MindmapLink handles the 'mindmap link' command (placeholder)
-func (c *CLI) MindmapLink(args []string) error {
-	c.UI.Info("Mindmap linking functionality is not implemented yet.")
+// MindmapConnect handles the 'mindmap connect' command (placeholder)
+func (c *CLI) MindmapConnect(args []string) error {
+	c.UI.Info("Mindmap connection functionality is not implemented yet.")
 	return nil
 }
 
@@ -306,23 +329,23 @@ func (c *CLI) ExecuteMindmapCommand(args []string) error {
 	case "add":
 		return c.MindmapAdd(args[1:])
 	case "mod":
-		return c.MindmapMod(args[1:])
+		return c.MindmapModify(args[1:])
 	case "del":
-		return c.MindmapDel(args[1:])
-	case "access":
-		return c.MindmapAccess(args[1:])
-	case "load":
-		return c.MindmapLoad(args[1:])
-	case "save":
-		return c.MindmapSave(args[1:])
+		return c.MindmapDelete(args[1:])
+	case "permission":
+		return c.MindmapPermission(args[1:])
+	case "import":
+		return c.MindmapImport(args[1:])
+	case "export":
+		return c.MindmapExport(args[1:])
 	case "select":
 		return c.MindmapSelect(args[1:])
 	case "list":
 		return c.MindmapList(args[1:])
 	case "view":
 		return c.MindmapView(args[1:])
-	case "link":
-		return c.MindmapLink(args[1:])
+	case "connect":
+		return c.MindmapConnect(args[1:])
 	default:
 		return fmt.Errorf("unknown mindmap operation: %s", operation)
 	}

@@ -94,7 +94,7 @@ func (s *SQLiteStore) EnsureGuestUser() error {
 		return fmt.Errorf("failed to check if guest user exists: %w", err)
 	}
 	if !exists {
-		err = s.UserStorage.AddUser("guest", "") // Empty password for guest
+		err = s.UserStorage.UserAdd("guest", "") // Empty password for guest
 		if err != nil {
 			return fmt.Errorf("failed to create guest user: %w", err)
 		}
@@ -102,82 +102,78 @@ func (s *SQLiteStore) EnsureGuestUser() error {
 	return nil
 }
 
-func (s *SQLiteStore) AddUser(username, hashedPassword string) error {
-	return s.UserStorage.AddUser(username, hashedPassword)
+func (s *SQLiteStore) UserAdd(username, hashedPassword string) error {
+	return s.UserStorage.UserAdd(username, hashedPassword)
 }
 
-func (s *SQLiteStore) DeleteUser(username string) error {
-	return s.UserStorage.DeleteUser(username)
+func (s *SQLiteStore) UserDelete(username string) error {
+	return s.UserStorage.UserDelete(username)
 }
 
 func (s *SQLiteStore) UserExists(username string) (bool, error) {
 	return s.UserStorage.UserExists(username)
 }
 
-func (s *SQLiteStore) GetUser(username string) (*models.User, error) {
-	return s.UserStorage.GetUser(username)
+func (s *SQLiteStore) UserGet(username string) (*models.User, error) {
+	return s.UserStorage.UserGet(username)
 }
 
-func (s *SQLiteStore) ModifyUser(oldUsername, newUsername, newHashedPassword string) error {
-	return s.UserStorage.ModifyUser(oldUsername, newUsername, newHashedPassword)
+func (s *SQLiteStore) UserModify(oldUsername, newUsername, newHashedPassword string) error {
+	return s.UserStorage.UserModify(oldUsername, newUsername, newHashedPassword)
 }
 
-func (s *SQLiteStore) AuthenticateUser(username, password string) (bool, error) {
-	return s.UserStorage.AuthenticateUser(username, password)
+func (s *SQLiteStore) UserAuthenticate(username, password string) (bool, error) {
+	return s.UserStorage.UserAuthenticate(username, password)
 }
 
-func (s *SQLiteStore) AddMindmap(name string, owner string, isPublic bool) (int, error) {
-	return s.MindmapStorage.AddMindmap(name, owner, isPublic)
+func (s *SQLiteStore) MindmapAdd(name string, owner string, isPublic bool) (int, error) {
+	return s.MindmapStorage.MindmapAdd(name, owner, isPublic)
 }
 
-func (s *SQLiteStore) DeleteMindmap(name string, username string) error {
-	return s.MindmapStorage.DeleteMindmap(name, username)
+func (s *SQLiteStore) MindmapDelete(name string, username string) error {
+	return s.MindmapStorage.MindmapDelete(name, username)
 }
 
-func (s *SQLiteStore) GetAllMindmaps(username string) ([]MindmapInfo, error) {
-	return s.MindmapStorage.GetAllMindmaps(username)
+func (s *SQLiteStore) MindmapGetAll(username string) ([]MindmapInfo, error) {
+	return s.MindmapStorage.MindmapGetAll(username)
 }
 
 func (s *SQLiteStore) MindmapExists(name string, username string) (bool, error) {
 	return s.MindmapStorage.MindmapExists(name, username)
 }
 
-func (s *SQLiteStore) ModifyMindmapAccess(name string, username string, isPublic bool) error {
-	return s.MindmapStorage.ModifyMindmapAccess(name, username, isPublic)
+func (s *SQLiteStore) MindmapPermission(name string, username string, setPublic ...bool) (bool, error) {
+	return s.MindmapStorage.MindmapPermission(name, username, setPublic...)
 }
 
-func (s *SQLiteStore) HasMindmapPermission(mindmapName string, username string) (bool, error) {
-	return s.MindmapStorage.HasMindmapPermission(mindmapName, username)
+func (s *SQLiteStore) NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error {
+	return s.NodeStorage.NodeAdd(mindmapName, username, parentID, content, extra, logicalIndex)
 }
 
-func (s *SQLiteStore) AddNode(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error {
-	return s.NodeStorage.AddNode(mindmapName, username, parentID, content, extra, logicalIndex)
+func (s *SQLiteStore) NodeDelete(mindmapName string, username string, id int) error {
+	return s.NodeStorage.NodeDelete(mindmapName, username, id)
 }
 
-func (s *SQLiteStore) DeleteNode(mindmapName string, username string, id int) error {
-	return s.NodeStorage.DeleteNode(mindmapName, username, id)
+func (s *SQLiteStore) NodeGet(mindmapName string, username string, id int) ([]*models.Node, error) {
+	return s.NodeStorage.NodeGet(mindmapName, username, id)
 }
 
-func (s *SQLiteStore) GetNode(mindmapName string, username string, id int) ([]*models.Node, error) {
-	return s.NodeStorage.GetNode(mindmapName, username, id)
+func (s *SQLiteStore) NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error) {
+	return s.NodeStorage.NodeGetParent(mindmapName, username, id)
 }
 
-func (s *SQLiteStore) GetParentNode(mindmapName string, username string, id int) ([]*models.Node, error) {
-	return s.NodeStorage.GetParentNode(mindmapName, username, id)
+func (s *SQLiteStore) NodeGetAll(mindmapName string, username string) ([]*models.Node, error) {
+	return s.NodeStorage.NodeGetAll(mindmapName, username)
 }
 
-func (s *SQLiteStore) GetAllNodesForMindmap(mindmapName string, username string) ([]*models.Node, error) {
-	return s.NodeStorage.GetAllNodesForMindmap(mindmapName, username)
+func (s *SQLiteStore) NodeModify(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
+	return s.NodeStorage.NodeModify(mindmapName, username, id, content, extra, logicalIndex)
 }
 
-func (s *SQLiteStore) ModifyNode(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error {
-	return s.NodeStorage.ModifyNode(mindmapName, username, id, content, extra, logicalIndex)
+func (s *SQLiteStore) NodeMove(mindmapName string, username string, sourceID, targetID int) error {
+	return s.NodeStorage.NodeMove(mindmapName, username, sourceID, targetID)
 }
 
-func (s *SQLiteStore) MoveNode(mindmapName string, username string, sourceID, targetID int) error {
-	return s.NodeStorage.MoveNode(mindmapName, username, sourceID, targetID)
-}
-
-func (s *SQLiteStore) UpdateNodeOrder(mindmapName string, username string, nodeID int, logicalIndex string) error {
-	return s.NodeStorage.UpdateNodeOrder(mindmapName, username, nodeID, logicalIndex)
+func (s *SQLiteStore) NodeOrderUpdate(mindmapName string, username string, nodeID int, logicalIndex string) error {
+	return s.NodeStorage.NodeOrderUpdate(mindmapName, username, nodeID, logicalIndex)
 }

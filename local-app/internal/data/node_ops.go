@@ -10,12 +10,12 @@ import (
 )
 
 type NodeOperations interface {
-	AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error
-	DeleteNode(identifier string, useIndex bool) error
-	ModifyNode(identifier string, content string, extra map[string]string, useIndex bool) error
-	MoveNode(sourceIdentifier, targetIdentifier string, useIndex bool) error
-	FindNode(query string, showIndex bool) ([]string, error)
-	Sort(identifier string, field string, reverse bool, useIndex bool) error
+	NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error
+	NodeDelete(identifier string, useIndex bool) error
+	NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error
+	NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error
+	NodeFind(query string, showIndex bool) ([]string, error)
+	NodeSort(identifier string, field string, reverse bool, useIndex bool) error
 }
 
 type NodeManager struct {
@@ -26,7 +26,7 @@ func NewNodeManager(mm *MindmapManager) *NodeManager {
 	return &NodeManager{mm: mm}
 }
 
-func (nm *NodeManager) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
+func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -63,7 +63,7 @@ func (nm *NodeManager) AddNode(parentIdentifier string, content string, extra ma
 	}
 
 	// Add to storage
-	if err := nm.mm.Store.AddNode(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
+	if err := nm.mm.Store.NodeAdd(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to add node to storage: %w", err)
 	}
 
@@ -81,12 +81,12 @@ func (nm *NodeManager) AddNode(parentIdentifier string, content string, extra ma
 		NewContent: content,
 		NewExtra:   extra,
 	}
-	nm.mm.HistoryManager.AddToHistory(op)
+	nm.mm.HistoryManager.HistoryAdd(op)
 
 	return nil
 }
 
-func (nm *NodeManager) DeleteNode(identifier string, useIndex bool) error {
+func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -110,7 +110,7 @@ func (nm *NodeManager) DeleteNode(identifier string, useIndex bool) error {
 
 	// Remove from storage
 	for _, n := range deletedTree {
-		if err := nm.mm.Store.DeleteNode(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, n.Index); err != nil {
+		if err := nm.mm.Store.NodeDelete(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, n.Index); err != nil {
 			return fmt.Errorf("failed to delete node from storage: %w", err)
 		}
 	}
@@ -141,12 +141,12 @@ func (nm *NodeManager) DeleteNode(identifier string, useIndex bool) error {
 		},
 		DeletedTree: deletedTree,
 	}
-	nm.mm.HistoryManager.AddToHistory(op)
+	nm.mm.HistoryManager.HistoryAdd(op)
 
 	return nil
 }
 
-func (nm *NodeManager) ModifyNode(identifier string, content string, extra map[string]string, useIndex bool) error {
+func (nm *NodeManager) NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -178,7 +178,7 @@ func (nm *NodeManager) ModifyNode(identifier string, content string, extra map[s
 	}
 
 	// Update in storage
-	if err := nm.mm.Store.ModifyNode(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
+	if err := nm.mm.Store.NodeModify(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to update node in storage: %w", err)
 	}
 
@@ -193,12 +193,12 @@ func (nm *NodeManager) ModifyNode(identifier string, content string, extra map[s
 		OldExtra:   oldExtra,
 		NewExtra:   extra,
 	}
-	nm.mm.HistoryManager.AddToHistory(op)
+	nm.mm.HistoryManager.HistoryAdd(op)
 
 	return nil
 }
 
-func (nm *NodeManager) MoveNode(sourceIdentifier, targetIdentifier string, useIndex bool) error {
+func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -237,7 +237,7 @@ func (nm *NodeManager) MoveNode(sourceIdentifier, targetIdentifier string, useIn
 	sourceNode.ParentID = targetNode.Index
 
 	// Update in storage
-	if err := nm.mm.Store.MoveNode(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
+	if err := nm.mm.Store.NodeMove(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
 		return fmt.Errorf("failed to move node in storage: %w", err)
 	}
 
@@ -256,12 +256,12 @@ func (nm *NodeManager) MoveNode(sourceIdentifier, targetIdentifier string, useIn
 		OldParentID: oldParentID,
 		NewParentID: targetNode.Index,
 	}
-	nm.mm.HistoryManager.AddToHistory(op)
+	nm.mm.HistoryManager.HistoryAdd(op)
 
 	return nil
 }
 
-func (nm *NodeManager) FindNode(query string, showIndex bool) ([]string, error) {
+func (nm *NodeManager) NodeFind(query string, showIndex bool) ([]string, error) {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return nil, fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -294,7 +294,7 @@ func (nm *NodeManager) FindNode(query string, showIndex bool) ([]string, error) 
 	return output, nil
 }
 
-func (nm *NodeManager) SortNode(identifier string, field string, reverse bool, useIndex bool) error {
+func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current data: %w", err)
 	}
@@ -488,7 +488,7 @@ func (nm *NodeManager) updateNodeOrder(nodeID int, logicalIndex string) error {
 	}
 
 	mindmapName := nm.mm.CurrentMindmap.Name
-	err := nm.mm.Store.UpdateNodeOrder(mindmapName, nm.mm.CurrentUser, nodeID, logicalIndex)
+	err := nm.mm.Store.NodeOrderUpdate(mindmapName, nm.mm.CurrentUser, nodeID, logicalIndex)
 	if err != nil {
 		return fmt.Errorf("failed to update node order in database: %w", err)
 	}

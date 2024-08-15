@@ -46,7 +46,7 @@ func NewManager(store storage.Store) (*Manager, error) {
 
 // ChangeUser changes the current user and updates all managers
 func (m *Manager) ChangeUser(username string) error {
-	err := m.UserManager.ChangeUser(username)
+	err := m.UserManager.UserSelect(username)
 	if err != nil {
 		return fmt.Errorf("failed to change user: %w", err)
 	}
@@ -56,72 +56,58 @@ func (m *Manager) ChangeUser(username string) error {
 	return nil
 }
 
-// CreateMindmap creates a new data
-func (m *Manager) CreateMindmap(name string, isPublic bool) error {
-	return m.MindmapManager.AddMindmap(name, isPublic)
+func (m *Manager) MindmapAdd(name string, isPublic bool) error {
+	return m.MindmapManager.MindmapAdd(name, isPublic)
 }
 
-// DeleteMindmap deletes an existing data
-func (m *Manager) DeleteMindmap(name string) error {
-	return m.MindmapManager.DeleteMindmap(name)
+func (m *Manager) MindmapDelete(name string) error {
+	return m.MindmapManager.MindmapDelete(name)
 }
 
-// ChangeMindmap switches to a different data
-func (m *Manager) ChangeMindmap(name string) error {
-	return m.MindmapManager.ChangeMindmap(name)
+func (m *Manager) MindmapSelect(name string) error {
+	return m.MindmapManager.MindmapSelect(name)
 }
 
-// AddNode adds a new node to the current data
-func (m *Manager) AddNode(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
-	return m.NodeManager.AddNode(parentIdentifier, content, extra, useIndex)
+func (m *Manager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
+	return m.NodeManager.NodeAdd(parentIdentifier, content, extra, useIndex)
 }
 
-// DeleteNode deletes a node from the current data
-func (m *Manager) DeleteNode(identifier string, useIndex bool) error {
-	return m.NodeManager.DeleteNode(identifier, useIndex)
+func (m *Manager) NodeDelete(identifier string, useIndex bool) error {
+	return m.NodeManager.NodeDelete(identifier, useIndex)
 }
 
-// ModifyNode modifies an existing node in the current data
-func (m *Manager) ModifyNode(identifier string, content string, extra map[string]string, useIndex bool) error {
-	return m.NodeManager.ModifyNode(identifier, content, extra, useIndex)
+func (m *Manager) NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error {
+	return m.NodeManager.NodeModify(identifier, content, extra, useIndex)
 }
 
-// MoveNode moves a node to a new parent in the current data
-func (m *Manager) MoveNode(sourceIdentifier, targetIdentifier string, useIndex bool) error {
-	return m.NodeManager.MoveNode(sourceIdentifier, targetIdentifier, useIndex)
+func (m *Manager) NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error {
+	return m.NodeManager.NodeMove(sourceIdentifier, targetIdentifier, useIndex)
 }
 
-// Undo undoes the last operation
-func (m *Manager) Undo() error {
+func (m *Manager) SystemUndo() error {
 	return m.HistoryManager.Undo()
 }
 
-// Redo redoes the last undone operation
-func (m *Manager) Redo() error {
+func (m *Manager) SystemRedo() error {
 	return m.HistoryManager.Redo()
 }
 
-// SaveMindmap saves the current data to a file
-func (m *Manager) SaveMindmap(filename, format string) error {
-	return m.MindmapManager.SaveMindmap(filename, format)
+func (m *Manager) MindmapExport(filename, format string) error {
+	return m.MindmapManager.MindmapExport(filename, format)
 }
 
-// LoadMindmap loads a data from a file
-func (m *Manager) LoadMindmap(filename, format string) error {
-	return m.MindmapManager.LoadMindmap(filename, format)
+func (m *Manager) MindmapImport(filename, format string) error {
+	return m.MindmapManager.MindmapImport(filename, format)
 }
 
-// ListMindmaps returns a list of all mindmaps for the current user
-func (m *Manager) ListMindmaps() ([]storage.MindmapInfo, error) {
-	return m.MindmapManager.ListMindmap()
+func (m *Manager) MindmapList() ([]storage.MindmapInfo, error) {
+	return m.MindmapManager.MindmapList()
 }
 
-// ShowMindmap returns a visual representation of the current data
 func (m *Manager) ShowMindmap(logicalIndex string, showIndex bool) ([]string, error) {
-	return m.MindmapManager.ShowMindmap(logicalIndex, showIndex)
+	return m.MindmapManager.MindmapView(logicalIndex, showIndex)
 }
 
-// ModifyMindmapAccess changes the access level of a data
-func (m *Manager) ModifyMindmapAccess(name string, isPublic bool) error {
-	return m.MindmapManager.ModifyMindmapAccess(name, isPublic)
+func (m *Manager) MindmapPermission(name string, username string, setPublic ...bool) (bool, error) {
+	return m.MindmapManager.MindmapPermission(name, username, setPublic...)
 }

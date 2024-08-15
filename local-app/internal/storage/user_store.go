@@ -1,10 +1,11 @@
 package storage
 
 import (
-	"database/sql"
 	"fmt"
+
 	"mindnoscape/local-app/internal/models"
 
+	"database/sql"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -16,7 +17,7 @@ func NewSQLiteUserStorage(db *sql.DB) *SQLiteUserStorage {
 	return &SQLiteUserStorage{db: db}
 }
 
-func (s *SQLiteUserStorage) AddUser(username, password string) error {
+func (s *SQLiteUserStorage) UserAdd(username, password string) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
@@ -36,7 +37,7 @@ func (s *SQLiteUserStorage) EnsureGuestUser() error {
 		return fmt.Errorf("failed to check if guest user exists: %w", err)
 	}
 	if !exists {
-		err = s.AddUser("guest", "") // Empty password for guest
+		err = s.UserAdd("guest", "") // Empty password for guest
 		if err != nil {
 			return fmt.Errorf("failed to create guest user: %w", err)
 		}
@@ -44,7 +45,7 @@ func (s *SQLiteUserStorage) EnsureGuestUser() error {
 	return nil
 }
 
-func (s *SQLiteUserStorage) DeleteUser(username string) error {
+func (s *SQLiteUserStorage) UserDelete(username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -79,7 +80,7 @@ func (s *SQLiteUserStorage) UserExists(username string) (bool, error) {
 	return count > 0, nil
 }
 
-func (s *SQLiteUserStorage) GetUser(username string) (*models.User, error) {
+func (s *SQLiteUserStorage) UserGet(username string) (*models.User, error) {
 	user := &models.User{}
 	err := s.db.QueryRow("SELECT username, password_hash FROM users WHERE username = ?", username).Scan(&user.Username, &user.PasswordHash)
 	if err != nil {
@@ -91,7 +92,7 @@ func (s *SQLiteUserStorage) GetUser(username string) (*models.User, error) {
 	return user, nil
 }
 
-func (s *SQLiteUserStorage) ModifyUser(oldUsername, newUsername, newPassword string) error {
+func (s *SQLiteUserStorage) UserModify(oldUsername, newUsername, newPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -129,7 +130,7 @@ func (s *SQLiteUserStorage) ModifyUser(oldUsername, newUsername, newPassword str
 	return nil
 }
 
-func (s *SQLiteUserStorage) AuthenticateUser(username, password string) (bool, error) {
+func (s *SQLiteUserStorage) UserAuthenticate(username, password string) (bool, error) {
 	var hashedPassword []byte
 	err := s.db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&hashedPassword)
 	if err != nil {
