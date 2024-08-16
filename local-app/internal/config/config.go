@@ -8,11 +8,14 @@ import (
 )
 
 type Config struct {
-	DatabaseDir  string `json:"database_dir"`
-	DatabaseFile string `json:"database_file"`
-	LogFolder    string `json:"log_folder"`
-	CommandLog   string `json:"command_log"`
-	ErrorLog     string `json:"error_log"`
+	DatabaseDir         string `json:"database_dir"`
+	DatabaseFile        string `json:"database_file"`
+	LogFolder           string `json:"log_folder"`
+	CommandLog          string `json:"command_log"`
+	ErrorLog            string `json:"error_log"`
+	DefaultUser         string `json:"default_user"`
+	DefaultUserActive   bool   `json:"default_user_active"`
+	DefaultUserPassword string `json:"default_user_password"`
 }
 
 var (
@@ -20,7 +23,7 @@ var (
 	configPath    = "./data/config.json"
 )
 
-func LoadConfig() error {
+func ConfigLoad() error {
 	// Ensure the data directory exists
 	dataDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -30,13 +33,15 @@ func LoadConfig() error {
 	// Check if the config file exists, if not create a default one
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		defaultConfig := &Config{
-			DatabaseDir:  "./data",
-			DatabaseFile: "mindnoscape.db",
-			LogFolder:    "./log",
-			CommandLog:   "commands.log",
-			ErrorLog:     "errors.log",
+			DatabaseDir:       "./data",
+			DatabaseFile:      "mindnoscape.db",
+			LogFolder:         "./log",
+			CommandLog:        "commands.log",
+			ErrorLog:          "errors.log",
+			DefaultUser:       "default",
+			DefaultUserActive: true,
 		}
-		if err := SaveConfig(defaultConfig); err != nil {
+		if err := ConfigSave(defaultConfig); err != nil {
 			return fmt.Errorf("failed to create default config: %v", err)
 		}
 		currentConfig = defaultConfig
@@ -57,7 +62,7 @@ func LoadConfig() error {
 	return nil
 }
 
-func SaveConfig(cfg *Config) error {
+func ConfigSave(cfg *Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("error marshaling config: %v", err)
@@ -70,6 +75,6 @@ func SaveConfig(cfg *Config) error {
 	return nil
 }
 
-func GetConfig() *Config {
+func ConfigGet() *Config {
 	return currentConfig
 }

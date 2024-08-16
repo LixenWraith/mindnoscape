@@ -32,7 +32,6 @@ func (c *CLI) NodeAdd(args []string) error {
 	extra := make(map[string]string)
 	useIndex := false
 
-	// Process extra fields and check for --index flag
 	for _, arg := range args[2:] {
 		if arg == "--index" {
 			useIndex = true
@@ -53,7 +52,7 @@ func (c *CLI) NodeAdd(args []string) error {
 	return nil
 }
 
-// NodeMod handles the 'node mod' command
+// NodeModify handles the 'node mod' command
 func (c *CLI) NodeModify(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: node mod <node> <content> [<extra field label>:<extra field value>]... [--index]")
@@ -64,7 +63,6 @@ func (c *CLI) NodeModify(args []string) error {
 	extra := make(map[string]string)
 	useIndex := false
 
-	// Process extra fields and check for --index flag
 	for i := 2; i < len(args); i++ {
 		if args[i] == "--index" {
 			useIndex = true
@@ -95,7 +93,6 @@ func (c *CLI) NodeMove(args []string) error {
 	targetIdentifier := args[1]
 	useIndex := false
 
-	// Check for --index flag
 	if len(args) > 2 && args[2] == "--index" {
 		useIndex = true
 	}
@@ -109,7 +106,7 @@ func (c *CLI) NodeMove(args []string) error {
 	return nil
 }
 
-// NodeDel handles the 'node del' command
+// NodeDelete handles the 'node del' command
 func (c *CLI) NodeDelete(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: node del <node> [--index]")
@@ -118,7 +115,6 @@ func (c *CLI) NodeDelete(args []string) error {
 	identifier := args[0]
 	useIndex := false
 
-	// Check for --index flag
 	if len(args) > 1 && args[1] == "--index" {
 		useIndex = true
 	}
@@ -141,12 +137,11 @@ func (c *CLI) NodeFind(args []string) error {
 	query := args[0]
 	showIndex := false
 
-	// Check for --index flag
 	if len(args) > 1 && args[1] == "--index" {
 		showIndex = true
 	}
 
-	// If the query is enclosed in quotes, remove them
+	// Removing queried string if enclosed by quotes
 	if strings.HasPrefix(query, "\"") && strings.HasSuffix(query, "\"") {
 		query = query[1 : len(query)-1]
 	}
@@ -204,9 +199,39 @@ func (c *CLI) NodeSort(args []string) error {
 	return nil
 }
 
-// NodeLink handles the 'node link' command (placeholder)
+// NodeConnect handles the 'node connect' command (placeholder)
 func (c *CLI) NodeConnect(args []string) error {
 	c.UI.Info("Node connection functionality is not implemented yet.")
+	return nil
+}
+
+// NodeUndo handles the 'node undo' command
+func (c *CLI) NodeUndo(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: node undo")
+	}
+
+	err := c.Data.NodeManager.NodeUndo()
+	if err != nil {
+		return err
+	}
+
+	c.UI.Success("Undo successful")
+	return nil
+}
+
+// NodeRedo handles the 'node redo' command
+func (c *CLI) NodeRedo(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: node redo")
+	}
+
+	err := c.Data.NodeManager.NodeRedo()
+	if err != nil {
+		return err
+	}
+
+	c.UI.Success("Redo successful")
 	return nil
 }
 
@@ -236,6 +261,10 @@ func (c *CLI) ExecuteNodeCommand(args []string) error {
 		return c.NodeSort(args[1:])
 	case "link":
 		return c.NodeConnect(args[1:])
+	case "undo":
+		return c.NodeUndo(args[1:])
+	case "redo":
+		return c.NodeRedo(args[1:])
 	default:
 		return fmt.Errorf("unknown node operation: %s", operation)
 	}

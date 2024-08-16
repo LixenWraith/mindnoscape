@@ -24,7 +24,7 @@ type CLI struct {
 func NewCLI(dataManager *data.Manager, logger *log.Logger) (*CLI, error) {
 	cli := &CLI{
 		Data:        dataManager,
-		CurrentUser: "guest",
+		CurrentUser: "",
 		UI:          ui.NewUI(os.Stdout, true),
 		Logger:      logger,
 	}
@@ -35,8 +35,9 @@ func NewCLI(dataManager *data.Manager, logger *log.Logger) (*CLI, error) {
 func (c *CLI) UpdatePrompt() {
 	mindmapName := ""
 	if c.Data.MindmapManager.CurrentMindmap != nil {
-		mindmapName = c.Data.MindmapManager.CurrentMindmap.Root.Content
+		mindmapName = c.Data.MindmapManager.CurrentMindmap.Name
 	}
+	c.CurrentUser = c.Data.UserManager.UserGet()
 	c.Prompt = c.UI.GetPromptString(c.CurrentUser, mindmapName)
 }
 
@@ -135,8 +136,9 @@ func (c *CLI) RunInteractive() error {
 		if err == io.EOF {
 			return err
 		}
-		c.UI.Error(err.Error())
 	}
+
+	c.UpdatePrompt()
 
 	return err
 }
@@ -176,20 +178,125 @@ func (c *CLI) ExecuteCommand(args []string) error {
 		return fmt.Errorf("no command provided")
 	}
 
+	// Expand concise command to full command
+	if len(args) >= 2 {
+		args[0], args[1] = c.expandCommand(args[0], args[1])
+	}
+
+	var err error
 	switch args[0] {
 	case "user":
-		return c.ExecuteUserCommand(args[1:])
+
+		err = c.ExecuteUserCommand(args[1:])
 	case "mindmap":
-		return c.ExecuteMindmapCommand(args[1:])
+		err = c.ExecuteMindmapCommand(args[1:])
 	case "node":
-		return c.ExecuteNodeCommand(args[1:])
+
+		err = c.ExecuteNodeCommand(args[1:])
 	case "system":
-		return c.ExecuteSystemCommand(args[1:])
+
+		err = c.ExecuteSystemCommand(args[1:])
 	case "help":
-		return c.HandleHelp(args[1:])
+
+		err = c.HandleHelp(args[1:])
 	default:
-		return fmt.Errorf("unknown command: %s", args[0])
+
+		err = fmt.Errorf("unknown command: %s", args[0])
 	}
+
+	return err
+}
+
+// expandCommand converts concise (one letter) commands and operations to the long (complete string) format
+func (c *CLI) expandCommand(scope, operation string) (string, string) {
+	expandedScope := scope
+	expandedOperation := operation
+
+	// Expand scope if it's a single letter
+	if len(scope) == 1 {
+		switch scope {
+		case "s":
+			expandedScope = "system"
+		case "u":
+			expandedScope = "user"
+		case "m":
+			expandedScope = "mindmap"
+		case "n":
+			expandedScope = "node"
+		}
+	}
+
+	// Expand operation if it's a single letter
+	if len(operation) == 1 {
+		switch expandedScope {
+		case "user":
+			switch operation {
+			case "a":
+				expandedOperation = "add"
+			case "m":
+				expandedOperation = "mod"
+			case "d":
+				expandedOperation = "del"
+			case "s":
+				expandedOperation = "select"
+			case "l":
+				expandedOperation = "list"
+			}
+		case "mindmap":
+			switch operation {
+			case "a":
+				expandedOperation = "add"
+			case "m":
+				expandedOperation = "mod"
+			case "d":
+				expandedOperation = "del"
+			case "p":
+				expandedOperation = "permission"
+			case "i":
+				expandedOperation = "import"
+			case "e":
+				expandedOperation = "export"
+			case "s":
+				expandedOperation = "select"
+			case "l":
+				expandedOperation = "list"
+			case "v":
+				expandedOperation = "view"
+			case "c":
+				expandedOperation = "connect"
+			}
+		case "node":
+			switch operation {
+			case "a":
+				expandedOperation = "add"
+			case "m":
+				expandedOperation = "mod"
+			case "v":
+				expandedOperation = "move"
+			case "d":
+				expandedOperation = "del"
+			case "f":
+				expandedOperation = "find"
+			case "s":
+				expandedOperation = "sort"
+			case "l":
+				expandedOperation = "link"
+			case "u":
+				expandedOperation = "undo"
+			case "r":
+				expandedOperation = "redo"
+			}
+		case "system":
+			switch operation {
+			case "e":
+				expandedOperation = "exit"
+			case "q":
+				expandedOperation = "quit"
+			}
+		}
+	}
+
+	return expandedScope, expandedOperation
 }
 
 // stripColorCodes removes ANSI color codes and UI tags from the input string

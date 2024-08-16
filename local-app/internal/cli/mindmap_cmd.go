@@ -6,28 +6,6 @@ import (
 	"strings"
 )
 
-func (c *CLI) SystemInfo(args []string) error {
-	c.UI.Println("System Information:")
-	c.UI.Printf("Current User: %s\n", c.CurrentUser)
-
-	if c.Data.MindmapManager.CurrentMindmap != nil {
-		c.UI.Printf("Current Mindmap: %s\n", c.Data.MindmapManager.CurrentMindmap.Name)
-	} else {
-		c.UI.Println("Current Mindmap: None selected")
-	}
-
-	// TODO: Add more system information in future implementations
-	// Some ideas for future additions:
-	// - Number of users in the system
-	// - Total number of mindmaps
-	// - Database size
-	// - Application version
-	// - Last backup time
-	// - Current configuration settings
-
-	return nil
-}
-
 func (c *CLI) MindmapInfo(args []string) error {
 	if c.Data.MindmapManager.CurrentMindmap == nil {
 		c.UI.Info("No mindmap is currently selected.")
@@ -44,23 +22,23 @@ func (c *CLI) MindmapAdd(args []string) error {
 	}
 
 	name := args[0]
-	isPublic := c.CurrentUser == "guest"
+	isPublic := false // Default to private mindmaps
 	err := c.Data.MindmapManager.MindmapAdd(name, isPublic)
 	if err != nil {
 		return err
 	}
 
-	c.UI.Success(fmt.Sprintf("New mindmap '%s' created and switched to", name))
+	c.UI.Success(fmt.Sprintf("New mindmap '%s' created", name))
 	return nil
 }
 
-// MindmapMod handles the 'mindmap mod' command (placeholder)
+// MindmapModify handles the 'mindmap mod' command (placeholder)
 func (c *CLI) MindmapModify(args []string) error {
 	c.UI.Info("Mindmap modification functionality is not implemented yet.")
 	return nil
 }
 
-// MindmapDel handles the 'mindmap del' command
+// MindmapDelete handles the 'mindmap del' command
 func (c *CLI) MindmapDelete(args []string) error {
 	if len(args) == 0 {
 		// Clear all mindmaps owned by the current user
@@ -92,7 +70,6 @@ func (c *CLI) MindmapDelete(args []string) error {
 		c.UI.Success(fmt.Sprintf("Mind map '%s' deleted", mindmapName))
 	}
 
-	c.UpdatePrompt()
 	return nil
 }
 
@@ -103,10 +80,11 @@ func (c *CLI) MindmapPermission(args []string) error {
 	}
 
 	mindmapName := args[0]
+	username := c.Data.UserManager.UserGet()
 
 	// Check permission
 	if len(args) == 1 {
-		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, c.CurrentUser)
+		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, username)
 		if err != nil {
 			return fmt.Errorf("failed to check mindmap permission: %v", err)
 		}
@@ -131,7 +109,7 @@ func (c *CLI) MindmapPermission(args []string) error {
 		return fmt.Errorf("invalid permission option: use 'public' or 'private'")
 	}
 
-	hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, c.CurrentUser, isPublic)
+	hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, username, isPublic)
 	if err != nil {
 		return fmt.Errorf("failed to update mindmap access: %v", err)
 	}
@@ -189,12 +167,11 @@ func (c *CLI) MindmapExport(args []string) error {
 // MindmapSelect handles the 'mindmap select' command
 func (c *CLI) MindmapSelect(args []string) error {
 	if len(args) == 0 {
-		if c.Data.MindmapManager.CurrentMindmap == nil {
-			c.UI.Info("Not currently in any mindmap, use 'mindmap select <mindmap name>' to select a mindmap")
-			return nil
+		err := c.Data.MindmapManager.MindmapSelect("")
+		if err != nil {
+			return err
 		}
-		c.Data.MindmapManager.CurrentMindmap = nil
-		c.UI.Info("Switched out of the current mindmap")
+		c.UI.Success("Deselected the current mindmap")
 		return nil
 	}
 
@@ -205,7 +182,6 @@ func (c *CLI) MindmapSelect(args []string) error {
 	}
 
 	c.UI.Success(fmt.Sprintf("Switched to mindmap '%s'", name))
-	c.UpdatePrompt()
 	return nil
 }
 

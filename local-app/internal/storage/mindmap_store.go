@@ -6,6 +6,21 @@ import (
 	"database/sql"
 )
 
+type MindmapInfo struct {
+	Name     string
+	IsPublic bool
+	Owner    string
+}
+
+type MindmapStore interface {
+	MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error)
+	MindmapDelete(mindmapName string, username string) error
+	MindmapGetAll(username string) ([]MindmapInfo, error)
+	MindmapExists(mindmapName string, username string) (bool, error)
+	MindmapPermission(mindmapName string, username string, setPublic ...bool) (bool, error)
+	MindmapGet(mindmapName string) (*MindmapInfo, error)
+}
+
 type SQLiteMindmapStorage struct {
 	db *sql.DB
 }
@@ -15,9 +30,12 @@ func NewSQLiteMindmapStorage(db *sql.DB) *SQLiteMindmapStorage {
 }
 
 func (s *SQLiteMindmapStorage) MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error) {
+	if owner == "" {
+		return 0, fmt.Errorf("owner cannot be empty")
+	}
 	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", mindmapName, owner, isPublic)
 	if err != nil {
-		return 0, fmt.Errorf("failed to add data: %w", err)
+		return 0, fmt.Errorf("failed to add mindmap: %w", err)
 	}
 
 	id, err := result.LastInsertId()
@@ -134,4 +152,16 @@ func (s *SQLiteMindmapStorage) MindmapPermission(mindmapName string, username st
 	}
 
 	return isOwner || isPublic, nil
+}
+
+func (s *SQLiteMindmapStorage) MindmapGet(mindmapName string) (*MindmapInfo, error) {
+	var info MindmapInfo
+	err := s.db.QueryRow("SELECT name, owner, is_public FROM mindmaps WHERE name = ?", mindmapName).Scan(&info.Name, &info.Owner, &info.IsPublic)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+		}
+		return nil, fmt.Errorf("failed to get mindmap info: %w", err)
+	}
+	return &info, nil
 }

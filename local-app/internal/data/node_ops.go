@@ -2,6 +2,7 @@ package data
 
 import (
 	"fmt"
+	"mindnoscape/local-app/internal/storage"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,24 +20,23 @@ type NodeOperations interface {
 }
 
 type NodeManager struct {
-	mm *MindmapManager
+	nodeStore      storage.NodeStore
+	mm             *MindmapManager
+	historyManager *HistoryManager
 }
 
 func NewNodeManager(mm *MindmapManager) *NodeManager {
-	return &NodeManager{mm: mm}
+	nm := &NodeManager{
+		nodeStore: mm.NodeStore,
+		mm:        mm,
+	}
+	nm.historyManager = NewHistoryManager(nm)
+	return nm
 }
 
 func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current data: %w", err)
-	}
-
-	if nm.mm.CurrentMindmap == nil {
-		return fmt.Errorf("no data selected")
-	}
-
-	if nm.mm.CurrentMindmap.Nodes == nil {
-		nm.mm.CurrentMindmap.Nodes = make(map[int]*models.Node)
+		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	parentNode, err := nm.findNodeByIndex(parentIdentifier, useIndex)
@@ -63,7 +63,7 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 	}
 
 	// Add to storage
-	if err := nm.mm.Store.NodeAdd(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
+	if err := nm.nodeStore.NodeAdd(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to add node to storage: %w", err)
 	}
 
@@ -81,14 +81,14 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 		NewContent: content,
 		NewExtra:   extra,
 	}
-	nm.mm.HistoryManager.HistoryAdd(op)
+	nm.historyManager.HistoryAdd(op)
 
 	return nil
 }
 
 func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current data: %w", err)
+		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	node, err := nm.findNodeByIndex(identifier, useIndex)
@@ -110,7 +110,7 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 
 	// Remove from storage
 	for _, n := range deletedTree {
-		if err := nm.mm.Store.NodeDelete(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, n.Index); err != nil {
+		if err := nm.nodeStore.NodeDelete(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, n.Index); err != nil {
 			return fmt.Errorf("failed to delete node from storage: %w", err)
 		}
 	}
@@ -127,7 +127,7 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 	nm.deleteNodeRecursive(node)
 
 	// Update logical indexes
-	err = nm.recalculateLogicalIndices(nm.mm.CurrentMindmap.Root)
+	err = nm.updateSubtreeLogicalIndices(nm.mm.CurrentMindmap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after deletion: %w", err)
 	}
@@ -141,14 +141,14 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 		},
 		DeletedTree: deletedTree,
 	}
-	nm.mm.HistoryManager.HistoryAdd(op)
+	nm.historyManager.HistoryAdd(op)
 
 	return nil
 }
 
 func (nm *NodeManager) NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current data: %w", err)
+		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	node, err := nm.findNodeByIndex(identifier, useIndex)
@@ -178,7 +178,7 @@ func (nm *NodeManager) NodeModify(identifier string, content string, extra map[s
 	}
 
 	// Update in storage
-	if err := nm.mm.Store.NodeModify(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
+	if err := nm.nodeStore.NodeModify(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
 		return fmt.Errorf("failed to update node in storage: %w", err)
 	}
 
@@ -193,14 +193,14 @@ func (nm *NodeManager) NodeModify(identifier string, content string, extra map[s
 		OldExtra:   oldExtra,
 		NewExtra:   extra,
 	}
-	nm.mm.HistoryManager.HistoryAdd(op)
+	nm.historyManager.HistoryAdd(op)
 
 	return nil
 }
 
 func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current data: %w", err)
+		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	sourceNode, err := nm.findNodeByIndex(sourceIdentifier, useIndex)
@@ -237,12 +237,12 @@ func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIn
 	sourceNode.ParentID = targetNode.Index
 
 	// Update in storage
-	if err := nm.mm.Store.NodeMove(nm.mm.CurrentMindmap.Root.Content, nm.mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
+	if err := nm.nodeStore.NodeMove(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
 		return fmt.Errorf("failed to move node in storage: %w", err)
 	}
 
 	// Update logical indexes starting from the root
-	err = nm.recalculateLogicalIndices(nm.mm.CurrentMindmap.Root)
+	err = nm.updateSubtreeLogicalIndices(nm.mm.CurrentMindmap.Root)
 	if err != nil {
 		return fmt.Errorf("failed to update logical indexes after move: %w", err)
 	}
@@ -256,14 +256,14 @@ func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIn
 		OldParentID: oldParentID,
 		NewParentID: targetNode.Index,
 	}
-	nm.mm.HistoryManager.HistoryAdd(op)
+	nm.historyManager.HistoryAdd(op)
 
 	return nil
 }
 
 func (nm *NodeManager) NodeFind(query string, showIndex bool) ([]string, error) {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return nil, fmt.Errorf("failed to ensure current data: %w", err)
+		return nil, fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	matches := []*models.Node{}
@@ -296,7 +296,7 @@ func (nm *NodeManager) NodeFind(query string, showIndex bool) ([]string, error) 
 
 func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, useIndex bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current data: %w", err)
+		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
 	var node *models.Node
@@ -315,23 +315,32 @@ func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, u
 		return fmt.Errorf("node not found")
 	}
 
-	// Sort children of the node in memory
-	nm.sortNodeChildrenRecursively(node, field, reverse)
-	err = nm.recalculateLogicalIndices(node)
-	if err != nil {
-		return fmt.Errorf("failed to recalculate logical indices after sorting: %w", err)
-	}
+	// Sort the entire subtree
+	nm.sortNodeSubtreeRecursively(node, field, reverse)
 
-	// Update the database to reflect the new order
-	err = nm.updateNodeOrderRecursive(node)
+	// Update logical indices in memory and database
+	err = nm.updateSubtreeLogicalIndices(node)
 	if err != nil {
-		return fmt.Errorf("failed to update node order in database: %w", err)
+		return fmt.Errorf("failed to update logical indices and persist changes after sorting: %w", err)
 	}
 
 	return nil
 }
 
-func (nm *NodeManager) sortNodeChildrenRecursively(node *models.Node, field string, reverse bool) {
+func (nm *NodeManager) NodeUndo() error {
+	return nm.historyManager.Undo()
+}
+
+func (nm *NodeManager) NodeRedo() error {
+	return nm.historyManager.Redo()
+}
+
+func (nm *NodeManager) NodeReset() {
+	nm.historyManager.HistoryReset()
+}
+
+func (nm *NodeManager) sortNodeSubtreeRecursively(node *models.Node, field string, reverse bool) {
+	// Sort the children of this node
 	sort.Slice(node.Children, func(i, j int) bool {
 		var vi, vj string
 		if field == "" {
@@ -365,7 +374,7 @@ func (nm *NodeManager) sortNodeChildrenRecursively(node *models.Node, field stri
 
 	// Recursively sort children of children
 	for _, child := range node.Children {
-		nm.sortNodeChildrenRecursively(child, field, reverse)
+		nm.sortNodeSubtreeRecursively(child, field, reverse)
 	}
 }
 
@@ -453,12 +462,13 @@ func (nm *NodeManager) deleteNodeRecursive(node *models.Node) {
 	delete(nm.mm.CurrentMindmap.Nodes, node.Index)
 }
 
-func (nm *NodeManager) recalculateLogicalIndices(node *models.Node) error {
+func (nm *NodeManager) updateSubtreeLogicalIndices(node *models.Node) error {
+	fmt.Println(node)
 	var recalculate func(*models.Node, string) error
 	recalculate = func(n *models.Node, parentIndex string) error {
 		for i, child := range n.Children {
 			var newLogicalIndex string
-			if parentIndex == "" {
+			if parentIndex == "0" {
 				newLogicalIndex = fmt.Sprintf("%d", i+1)
 			} else {
 				newLogicalIndex = fmt.Sprintf("%s.%d", parentIndex, i+1)
@@ -466,7 +476,7 @@ func (nm *NodeManager) recalculateLogicalIndices(node *models.Node) error {
 
 			if child.LogicalIndex != newLogicalIndex {
 				child.LogicalIndex = newLogicalIndex
-				err := nm.updateNodeOrder(child.Index, child.LogicalIndex)
+				err := nm.updateNodeLogicalIndex(child.Index, child.LogicalIndex)
 				if err != nil {
 					return fmt.Errorf("failed to update logical index for node %d: %w", child.Index, err)
 				}
@@ -479,33 +489,18 @@ func (nm *NodeManager) recalculateLogicalIndices(node *models.Node) error {
 		return nil
 	}
 
-	return recalculate(node, "")
+	return recalculate(node, node.LogicalIndex)
 }
 
-func (nm *NodeManager) updateNodeOrder(nodeID int, logicalIndex string) error {
+func (nm *NodeManager) updateNodeLogicalIndex(nodeID int, logicalIndex string) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return err
 	}
 
 	mindmapName := nm.mm.CurrentMindmap.Name
-	err := nm.mm.Store.NodeOrderUpdate(mindmapName, nm.mm.CurrentUser, nodeID, logicalIndex)
+	err := nm.nodeStore.NodeOrderUpdate(mindmapName, nm.mm.CurrentUser, nodeID, logicalIndex)
 	if err != nil {
 		return fmt.Errorf("failed to update node order in database: %w", err)
-	}
-
-	return nil
-}
-
-// This function replaces the previous updateNodeOrderInDB
-func (nm *NodeManager) updateNodeOrderRecursive(node *models.Node) error {
-	if err := nm.updateNodeOrder(node.Index, node.LogicalIndex); err != nil {
-		return fmt.Errorf("failed to update node order for node %d: %w", node.Index, err)
-	}
-
-	for _, child := range node.Children {
-		if err := nm.updateNodeOrderRecursive(child); err != nil {
-			return err
-		}
 	}
 
 	return nil

@@ -108,12 +108,15 @@ func (u *UI) Info(message string) {
 
 func (u *UI) GetPromptString(user, mindmap string) string {
 	var promptBuilder strings.Builder
-	promptBuilder.WriteString(u.colorize(user, ColorLightBlue))
-	if mindmap != "" {
-		promptBuilder.WriteString(u.colorize(" @ ", ColorWhite))
-		promptBuilder.WriteString(u.colorize(mindmap, ColorLightPurple))
+	if user != "" {
+		promptBuilder.WriteString(u.colorize(user, ColorLightBlue))
+		if mindmap != "" {
+			promptBuilder.WriteString(u.colorize(" @ ", ColorWhite))
+			promptBuilder.WriteString(u.colorize(mindmap, ColorLightPurple))
+		}
+		promptBuilder.WriteString(" ")
 	}
-	promptBuilder.WriteString(u.colorize(" > ", ColorGreen))
+	promptBuilder.WriteString(u.colorize("> ", ColorGreen))
 	return promptBuilder.String()
 }
 
@@ -192,6 +195,18 @@ func (u *UI) ReadLine(prompt string) (string, error) {
 	return string(input), nil
 }
 
+func (u *UI) ReadPassword(prompt string) (string, error) {
+	u.Print(prompt)
+
+	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	u.Println("") // Print a newline after the password input
+	if err != nil {
+		return "", fmt.Errorf("failed to read password: %w", err)
+	}
+
+	return string(password), nil
+}
+
 func (u *UI) readEscapeSequence() (string, error) {
 	buf := make([]byte, 2)
 	_, err := os.Stdin.Read(buf)
@@ -222,16 +237,4 @@ func (u *UI) redrawLine(remaining []byte) {
 	u.Print("\x1b[K") // Clear line from cursor to end
 	u.Print(string(remaining))
 	u.Print("\x1b[" + fmt.Sprintf("%d", len(remaining)) + "D") // Move cursor back
-}
-
-func (u *UI) ReadPassword(prompt string) (string, error) {
-	u.Print(prompt)
-
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	u.Println("") // Print a newline after the password input
-	if err != nil {
-		return "", fmt.Errorf("failed to read password: %w", err)
-	}
-
-	return string(password), nil
 }

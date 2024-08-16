@@ -1,61 +1,122 @@
 package storage
 
 import (
-	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"os"
 
 	"mindnoscape/local-app/internal/models"
+
+	"encoding/json"
+	"encoding/xml"
 )
 
-func ExportToFile(filename string, format string, mindmap *models.Mindmap) error {
-	exportableMindmap := mindmap.ToExportable()
-	var data []byte
-	var err error
+func FileExport(mindmapStore MindmapStore, nodeStore NodeStore, mindmapName, username, filename, format string) error {
+	// Check if the mindmap exists and the user has permission
+	exists, err := mindmapStore.MindmapExists(mindmapName, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if mindmap exists: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("mindmap '%s' does not exist or user doesn't have permission", mindmapName)
+	}
 
+	// Get all nodes for the mindmap
+	nodes, err := nodeStore.NodeGetAll(mindmapName, username)
+	if err != nil {
+		return fmt.Errorf("failed to get all nodes for mindmap '%s': %w", mindmapName, err)
+	}
+
+	root, err := buildTreeFromNodes(nodes)
+	if err != nil {
+		return fmt.Errorf("failed to build tree: %w", err)
+	}
+
+	mindmap := &models.Mindmap{
+		Name: mindmapName,
+		Root: root,
+	}
+
+	var data []byte
 	switch format {
 	case "json":
-		data, err = json.MarshalIndent(exportableMindmap, "", "  ")
+		data, err = json.MarshalIndent(mindmap, "", "  ")
 	case "xml":
-		data, err = xml.MarshalIndent(exportableMindmap, "", "  ")
+		data, err = xml.MarshalIndent(mindmap, "", "  ")
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to marshal mind map: %v", err)
+		return fmt.Errorf("failed to marshal mindmap: %w", err)
 	}
 
 	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write file: %v", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	return nil
 }
 
-func ImportFromFile(filename string, format string) (*models.Node, error) {
+func FileImport(mindmapStore MindmapStore, nodeStore NodeStore, username, filename, format string) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %v", err)
+		return fmt.Errorf("failed to read file: %w", err)
 	}
 
 	var root *models.Node
 	switch format {
 	case "json":
-		err = json.Unmarshal(data, &root)
+		var mindmap models.Mindmap
+		err = json.Unmarshal(data, &mindmap)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal JSON: %w", err)
+		}
+		root = mindmap.Root
 	case "xml":
 		root, err = unmarshalFromXML(data)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal XML: %w", err)
+		}
 	default:
-		return nil, fmt.Errorf("unsupported format: %s", format)
+		return fmt.Errorf("unsupported format: %s", format)
 	}
 
+	mindmapName := root.Content
+
+	// Check if the mindmap exists
+	exists, err := mindmapStore.MindmapExists(mindmapName, username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal mind map: %v", err)
+		return fmt.Errorf("failed to check if mindmap exists: %w", err)
 	}
 
-	return root, nil
+	// If the mindmap doesn't exist, create it
+	if !exists {
+		_, err = mindmapStore.MindmapAdd(mindmapName, username, false) // Use username and set isPublic to false
+		if err != nil {
+			return fmt.Errorf("failed to create mindmap: %w", err)
+		}
+	} else {
+		// If it exists, delete all existing nodes
+		nodes, err := nodeStore.NodeGetAll(mindmapName, username)
+		if err != nil {
+			return fmt.Errorf("failed to get existing nodes: %w", err)
+		}
+		for _, node := range nodes {
+			err = nodeStore.NodeDelete(mindmapName, username, node.Index)
+			if err != nil {
+				return fmt.Errorf("failed to delete existing node: %w", err)
+			}
+		}
+	}
+
+	// Insert new nodes
+	err = insertNodeRecursive(nodeStore, mindmapName, username, root, -1)
+	if err != nil {
+		return fmt.Errorf("failed to insert nodes for mindmap '%s': %w", mindmapName, err)
+	}
+
+	return nil
 }
 
 func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
@@ -86,63 +147,14 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 	return root, nil
 }
 
-func SaveToFile(store Store, mindmapName string, username string, filename string, format string) error {
-	nodes, err := store.NodeGetAll(mindmapName, username)
-	if err != nil {
-		return fmt.Errorf("failed to get all nodes for data '%s': %v", mindmapName, err)
-	}
-
-	root, err := buildTreeFromNodes(nodes)
-	if err != nil {
-		return fmt.Errorf("failed to build tree: %v", err)
-	}
-
-	mindmap := &models.Mindmap{
-		Name: mindmapName,
-		Root: root,
-	}
-
-	return ExportToFile(filename, format, mindmap)
-}
-
-func LoadFromFile(store Store, mindmapName string, username string, filename string, format string) error {
-	// First, import the file into a temporary root node
-	var root, err = ImportFromFile(filename, format)
-	if err != nil {
-		return err
-	}
-
-	// Check if the data exists
-	exists, err := store.MindmapExists(mindmapName, username)
-	if err != nil {
-		return fmt.Errorf("failed to check if data exists: %v", err)
-	}
-
-	// If the data doesn't exist, create it
-	if !exists {
-		_, err = store.MindmapAdd(mindmapName, username, false) // Use username and set isPublic to false
-		if err != nil {
-			return fmt.Errorf("failed to create data: %v", err)
-		}
-	}
-
-	// Insert new data
-	if err := insertNodeRecursive(store, mindmapName, root, -1); err != nil {
-		return fmt.Errorf("failed to insert nodes for data '%s': %v", mindmapName, err)
-	}
-
-	return nil
-}
-
-func insertNodeRecursive(store Store, mindmapName string, node *models.Node, parentID int) error {
-	// Use an empty string for username as this is used during import
-	err := store.NodeAdd(mindmapName, "", parentID, node.Content, node.Extra, node.LogicalIndex)
+func insertNodeRecursive(nodeStore NodeStore, mindmapName string, username string, node *models.Node, parentID int) error {
+	err := nodeStore.NodeAdd(mindmapName, username, parentID, node.Content, node.Extra, node.LogicalIndex)
 	if err != nil {
 		return err
 	}
 
 	for _, child := range node.Children {
-		err = insertNodeRecursive(store, mindmapName, child, node.Index)
+		err = insertNodeRecursive(nodeStore, mindmapName, username, child, node.Index)
 		if err != nil {
 			return err
 		}

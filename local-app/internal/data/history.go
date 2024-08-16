@@ -36,14 +36,14 @@ type Operation struct {
 type HistoryManager struct {
 	history      []Operation
 	historyIndex int
-	mm           *MindmapManager
+	nm           *NodeManager
 }
 
-func NewHistoryManager(mm *MindmapManager) *HistoryManager {
+func NewHistoryManager(nm *NodeManager) *HistoryManager {
 	return &HistoryManager{
 		history:      []Operation{},
 		historyIndex: -1,
-		mm:           mm,
+		nm:           nm,
 	}
 }
 
@@ -56,6 +56,11 @@ func (hm *HistoryManager) HistoryAdd(op Operation) {
 	hm.historyIndex++
 }
 
+func (hm *HistoryManager) HistoryReset() {
+	hm.history = []Operation{}
+	hm.historyIndex = -1
+}
+
 func (hm *HistoryManager) Undo() error {
 	if hm.historyIndex < 0 {
 		return fmt.Errorf("nothing to undo")
@@ -66,13 +71,16 @@ func (hm *HistoryManager) Undo() error {
 	var err error
 	switch op.Type {
 	case OpAdd:
-		err = hm.mm.NodeManager.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
+
+		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
 	case OpDelete:
+
 		err = hm.restoreSubtree(op.DeletedTree)
 	case OpMove:
-		err = hm.mm.NodeManager.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.OldParentID), true)
+
+		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.OldParentID), true)
 	case OpModify:
-		err = hm.mm.NodeManager.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.OldContent, op.OldExtra, true)
+		err = hm.nm.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.OldContent, op.OldExtra, true)
 	}
 
 	if err != nil {
@@ -93,13 +101,16 @@ func (hm *HistoryManager) Redo() error {
 	var err error
 	switch op.Type {
 	case OpAdd:
-		err = hm.mm.NodeManager.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true)
+
+		err = hm.nm.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true)
 	case OpDelete:
-		err = hm.mm.NodeManager.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
+
+		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
 	case OpMove:
-		err = hm.mm.NodeManager.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.NewParentID), true)
+
+		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.NewParentID), true)
 	case OpModify:
-		err = hm.mm.NodeManager.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.NewContent, op.NewExtra, true)
+		err = hm.nm.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.NewContent, op.NewExtra, true)
 	}
 
 	if err != nil {
@@ -112,7 +123,7 @@ func (hm *HistoryManager) Redo() error {
 
 func (hm *HistoryManager) restoreSubtree(nodes []*models.Node) error {
 	for _, node := range nodes {
-		err := hm.mm.NodeManager.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true)
+		err := hm.nm.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true)
 		if err != nil {
 			return fmt.Errorf("failed to restore node %d: %w", node.Index, err)
 		}

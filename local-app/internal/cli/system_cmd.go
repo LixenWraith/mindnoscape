@@ -16,33 +16,32 @@ func (c *CLI) SystemQuit() error {
 	return c.SystemExit()
 }
 
-// SystemUndo handles the 'system undo' command
-func (c *CLI) SystemUndo(args []string) error {
-	if len(args) != 0 {
-		return fmt.Errorf("usage: system undo")
+// SystemInfo handles the 'system' command
+func (c *CLI) SystemInfo(args []string) error {
+	c.UI.Println("System Information:")
+
+	currentUser := c.Data.UserManager.UserGet()
+	if currentUser == "" {
+		c.UI.Println("Current User: No user selected")
+	} else {
+		c.UI.Printf("Current User: %s\n", currentUser)
 	}
 
-	err := c.Data.HistoryManager.Undo()
-	if err != nil {
-		return err
+	if c.Data.MindmapManager.CurrentMindmap != nil {
+		c.UI.Printf("Current Mindmap: %s\n", c.Data.MindmapManager.CurrentMindmap.Name)
+	} else {
+		c.UI.Println("Current Mindmap: None selected")
 	}
 
-	c.UI.Success("Undo successful")
-	return nil
-}
+	// TODO: Add more system information in future implementations
+	// Some ideas for future additions:
+	// - Number of users in the system
+	// - Total number of mindmaps
+	// - Database size
+	// - Application version
+	// - Last backup time
+	// - Current configuration settings
 
-// SystemRedo handles the 'system redo' command
-func (c *CLI) SystemRedo(args []string) error {
-	if len(args) != 0 {
-		return fmt.Errorf("usage: system redo")
-	}
-
-	err := c.Data.HistoryManager.Redo()
-	if err != nil {
-		return err
-	}
-
-	c.UI.Success("Redo successful")
 	return nil
 }
 
@@ -58,10 +57,6 @@ func (c *CLI) ExecuteSystemCommand(args []string) error {
 		return c.SystemExit()
 	case "quit":
 		return c.SystemQuit()
-	case "undo":
-		return c.SystemUndo(args)
-	case "redo":
-		return c.SystemRedo(args)
 	default:
 		return fmt.Errorf("unknown system operation: %s", operation)
 	}

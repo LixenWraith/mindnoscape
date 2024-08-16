@@ -2,6 +2,7 @@ package data
 
 import (
 	"fmt"
+	"mindnoscape/local-app/internal/config"
 	"mindnoscape/local-app/internal/storage"
 )
 
@@ -14,100 +15,46 @@ const (
 
 // Manager is the main struct that coordinates all data operations
 type Manager struct {
-	Store          storage.Store
 	UserManager    *UserManager
 	MindmapManager *MindmapManager
 	NodeManager    *NodeManager
 	HistoryManager *HistoryManager
-	CurrentUser    string
+	Config         *config.Config
 }
 
 // NewManager creates a new Manager instance
-func NewManager(store storage.Store) (*Manager, error) {
+func NewManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *config.Config) (*Manager, error) {
 	m := &Manager{
-		Store:       store,
-		CurrentUser: "guest",
+		Config: cfg,
 	}
 
 	var err error
-	m.MindmapManager, err = NewMindmapManager(store, m.CurrentUser)
+	m.MindmapManager, err = NewMindmapManager(mindmapStore, nodeStore, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MindmapManager: %w", err)
 	}
 
-	m.HistoryManager = NewHistoryManager(m.MindmapManager)
-	m.UserManager = NewUserManager(m.MindmapManager)
-	m.NodeManager = NewNodeManager(m.MindmapManager)
-
-	m.MindmapManager.HistoryManager = m.HistoryManager
-
-	return m, nil
-}
-
-// ChangeUser changes the current user and updates all managers
-func (m *Manager) ChangeUser(username string) error {
-	err := m.UserManager.UserSelect(username)
+	m.UserManager, err = NewUserManager(userStore, cfg, m.MindmapManager)
 	if err != nil {
-		return fmt.Errorf("failed to change user: %w", err)
+		return nil, fmt.Errorf("failed to create UserManager: %w", err)
 	}
 
-	m.CurrentUser = username
-	m.MindmapManager.CurrentUser = username
-	return nil
-}
+	m.NodeManager = NewNodeManager(m.MindmapManager)
+	m.HistoryManager = NewHistoryManager(m.NodeManager)
 
-func (m *Manager) MindmapAdd(name string, isPublic bool) error {
-	return m.MindmapManager.MindmapAdd(name, isPublic)
-}
+	// Handle default user logic
+	if cfg.DefaultUserActive {
+		exists, err := m.UserManager.UserExists(cfg.DefaultUser)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check default user existence: %w", err)
+		}
+		if !exists {
+			err = m.UserManager.UserAdd(cfg.DefaultUser, cfg.DefaultUserPassword)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create default user: %w", err)
+			}
+		}
+	}
 
-func (m *Manager) MindmapDelete(name string) error {
-	return m.MindmapManager.MindmapDelete(name)
-}
-
-func (m *Manager) MindmapSelect(name string) error {
-	return m.MindmapManager.MindmapSelect(name)
-}
-
-func (m *Manager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
-	return m.NodeManager.NodeAdd(parentIdentifier, content, extra, useIndex)
-}
-
-func (m *Manager) NodeDelete(identifier string, useIndex bool) error {
-	return m.NodeManager.NodeDelete(identifier, useIndex)
-}
-
-func (m *Manager) NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error {
-	return m.NodeManager.NodeModify(identifier, content, extra, useIndex)
-}
-
-func (m *Manager) NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error {
-	return m.NodeManager.NodeMove(sourceIdentifier, targetIdentifier, useIndex)
-}
-
-func (m *Manager) SystemUndo() error {
-	return m.HistoryManager.Undo()
-}
-
-func (m *Manager) SystemRedo() error {
-	return m.HistoryManager.Redo()
-}
-
-func (m *Manager) MindmapExport(filename, format string) error {
-	return m.MindmapManager.MindmapExport(filename, format)
-}
-
-func (m *Manager) MindmapImport(filename, format string) error {
-	return m.MindmapManager.MindmapImport(filename, format)
-}
-
-func (m *Manager) MindmapList() ([]storage.MindmapInfo, error) {
-	return m.MindmapManager.MindmapList()
-}
-
-func (m *Manager) ShowMindmap(logicalIndex string, showIndex bool) ([]string, error) {
-	return m.MindmapManager.MindmapView(logicalIndex, showIndex)
-}
-
-func (m *Manager) MindmapPermission(name string, username string, setPublic ...bool) (bool, error) {
-	return m.MindmapManager.MindmapPermission(name, username, setPublic...)
+	return m, nil
 }

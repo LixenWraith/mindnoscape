@@ -5,7 +5,12 @@ import (
 )
 
 func (c *CLI) UserInfo(args []string) error {
-	c.UI.Printf("Current user: %s\n", c.CurrentUser)
+	currentUser := c.Data.UserManager.UserGet()
+	if currentUser == "" {
+		c.UI.Info("No user is currently selected.")
+	} else {
+		c.UI.Printf("Current user: %s\n", currentUser)
+	}
 	return nil
 }
 
@@ -105,21 +110,19 @@ func (c *CLI) UserDelete(args []string) error {
 
 // UserSelect handles the 'user select' command
 func (c *CLI) UserSelect(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: user select <username>")
-	}
-
-	username := args[0]
-	var password string
-	var err error
-
-	if username == "guest" {
-		password = ""
-	} else {
-		password, err = c.promptForPassword("Enter password: ")
+	if len(args) == 0 {
+		err := c.Data.UserManager.UserSelect("")
 		if err != nil {
 			return err
 		}
+		c.UI.Success("Deselected the current user")
+		return nil
+	}
+
+	username := args[0]
+	password, err := c.promptForPassword(fmt.Sprintf("Enter password for %s (press Enter for empty password): ", username))
+	if err != nil {
+		return err
 	}
 
 	authenticated, err := c.Data.UserManager.UserAuthenticate(username, password)
@@ -130,12 +133,11 @@ func (c *CLI) UserSelect(args []string) error {
 		return fmt.Errorf("invalid username or password")
 	}
 
-	err = c.Data.ChangeUser(username)
+	err = c.Data.UserManager.UserSelect(username)
 	if err != nil {
 		return fmt.Errorf("failed to switch user: %v", err)
 	}
 
-	c.CurrentUser = username
 	c.UI.Success(fmt.Sprintf("Switched to user: %s", username))
 	c.UpdatePrompt()
 	return nil

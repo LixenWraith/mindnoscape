@@ -9,6 +9,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type UserStore interface {
+	UserAdd(username, hashedPassword string) error
+	UserDelete(username string) error
+	UserExists(username string) (bool, error)
+	UserGet(username string) (*models.User, error)
+	UserModify(oldUsername, newUsername, newHashedPassword string) error
+	UserAuthenticate(username, password string) (bool, error)
+}
+
 type SQLiteUserStorage struct {
 	db *sql.DB
 }
@@ -28,20 +37,6 @@ func (s *SQLiteUserStorage) UserAdd(username, password string) error {
 		return fmt.Errorf("failed to add user: %w", err)
 	}
 
-	return nil
-}
-
-func (s *SQLiteUserStorage) EnsureGuestUser() error {
-	exists, err := s.UserExists("guest")
-	if err != nil {
-		return fmt.Errorf("failed to check if guest user exists: %w", err)
-	}
-	if !exists {
-		err = s.UserAdd("guest", "") // Empty password for guest
-		if err != nil {
-			return fmt.Errorf("failed to create guest user: %w", err)
-		}
-	}
 	return nil
 }
 

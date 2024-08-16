@@ -8,6 +8,17 @@ import (
 	"database/sql"
 )
 
+type NodeStore interface {
+	NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, logicalIndex string) error
+	NodeDelete(mindmapName string, username string, id int) error
+	NodeGet(mindmapName string, username string, id int) ([]*models.Node, error)
+	NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error)
+	NodeGetAll(mindmapName string, username string) ([]*models.Node, error)
+	NodeModify(mindmapName string, username string, id int, content string, extra map[string]string, logicalIndex string) error
+	NodeMove(mindmapName string, username string, sourceID, targetID int) error
+	NodeOrderUpdate(mindmapName string, username string, nodeID int, logicalIndex string) error
+}
+
 type SQLiteNodeStorage struct {
 	db *sql.DB
 }

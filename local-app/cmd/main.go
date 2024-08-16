@@ -22,7 +22,6 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Goroutine and channel to handle interrupt signal and signal program exit
-	// Handles Ctrl+C when UI input is not active!
 	exitChan := make(chan struct{})
 	go func() {
 		<-sigChan
@@ -34,11 +33,11 @@ func main() {
 	UI.Info("Welcome to Mindnoscape! Use 'help' for the list of commands.")
 
 	// Load configuration
-	if err := config.LoadConfig(); err != nil {
+	if err := config.ConfigLoad(); err != nil {
 		UI.Error(fmt.Sprintf("Failed to load configuration: %v", err))
 		os.Exit(1)
 	}
-	cfg := config.GetConfig()
+	cfg := config.ConfigGet()
 
 	// Initialize logger
 	logger, err := log.NewLogger(cfg.LogFolder, cfg.CommandLog, cfg.ErrorLog)
@@ -60,20 +59,12 @@ func main() {
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
-			// Handle the error, e.g., log it or return it
 			UI.Error(fmt.Sprintf("Error closing storage: %v\n", err))
 		}
 	}()
 
-	// Ensures the default user 'guest' exists in the database
-	err = store.EnsureGuestUser()
-	if err != nil {
-		UI.Error(fmt.Sprintf("Failed to ensure guest user: %v", err))
-		os.Exit(1)
-	}
-
 	// Initialize data manager
-	dataManager, err := data.NewManager(store)
+	dataManager, err := data.NewManager(store.UserStore, store.MindmapStore, store.NodeStore, cfg)
 	if err != nil {
 		UI.Error(fmt.Sprintf("Failed to create data manager: %v", err))
 		os.Exit(1)
