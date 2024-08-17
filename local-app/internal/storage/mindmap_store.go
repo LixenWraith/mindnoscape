@@ -4,21 +4,17 @@ import (
 	"fmt"
 
 	"database/sql"
-)
 
-type MindmapInfo struct {
-	Name     string
-	IsPublic bool
-	Owner    string
-}
+	"mindnoscape/local-app/internal/models"
+)
 
 type MindmapStore interface {
 	MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error)
 	MindmapDelete(mindmapName string, username string) error
-	MindmapGetAll(username string) ([]MindmapInfo, error)
+	MindmapGetAll(username string) ([]models.MindmapInfo, error)
 	MindmapExists(mindmapName string, username string) (bool, error)
 	MindmapPermission(mindmapName string, username string, setPublic ...bool) (bool, error)
-	MindmapGet(mindmapName string) (*MindmapInfo, error)
+	MindmapGet(mindmapName string) (*models.MindmapInfo, error)
 }
 
 type SQLiteMindmapStorage struct {
@@ -46,18 +42,24 @@ func (s *SQLiteMindmapStorage) MindmapAdd(mindmapName string, owner string, isPu
 	return int(id), nil
 }
 
-func (s *SQLiteMindmapStorage) MindmapDelete(mindmapName string, username string) error {
+func (s *SQLiteMindmapStorage) MindmapDelete(name string, username string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Get the data ID
+	// Get the mindmap ID
 	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
+	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", name, username).Scan(&mindmapID)
 	if err != nil {
-		return fmt.Errorf("failed to get data ID: %w", err)
+		return fmt.Errorf("failed to get mindmap ID: %w", err)
+	}
+
+	// Delete associated node attributes
+	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id IN (SELECT id FROM nodes WHERE mindmap_id = ?)", mindmapID)
+	if err != nil {
+		return fmt.Errorf("failed to delete node attributes: %w", err)
 	}
 
 	// Delete associated nodes
@@ -66,41 +68,43 @@ func (s *SQLiteMindmapStorage) MindmapDelete(mindmapName string, username string
 		return fmt.Errorf("failed to delete nodes: %w", err)
 	}
 
-	// Delete the data
+	// Delete the mindmap
 	_, err = tx.Exec("DELETE FROM mindmaps WHERE id = ?", mindmapID)
 	if err != nil {
-		return fmt.Errorf("failed to delete data: %w", err)
+		return fmt.Errorf("failed to delete mindmap: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	// Reset auto-increment counter of the mindmap
+	_, err = tx.Exec("DELETE FROM sqlite_sequence WHERE name IN ('mindmaps', 'nodes', 'node_attributes')")
+	if err != nil {
+		return fmt.Errorf("failed to reset auto-increment counters: %w", err)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
-func (s *SQLiteMindmapStorage) MindmapGetAll(username string) ([]MindmapInfo, error) {
+func (s *SQLiteMindmapStorage) MindmapGetAll(username string) ([]models.MindmapInfo, error) {
 	rows, err := s.db.Query(`
-		SELECT m.name, m.is_public, m.owner 
-		FROM mindmaps m
-		WHERE m.owner = ? OR m.is_public = 1
-	`, username)
+        SELECT m.id, m.name, m.is_public, m.owner 
+        FROM mindmaps m
+        WHERE m.owner = ? OR m.is_public = 1
+    `, username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query mindmaps: %w", err)
 	}
 	defer rows.Close()
 
-	var mindmaps []MindmapInfo
+	var mindmaps []models.MindmapInfo
 	for rows.Next() {
-		var m MindmapInfo
-		if err := rows.Scan(&m.Name, &m.IsPublic, &m.Owner); err != nil {
-			return nil, fmt.Errorf("failed to scan data row: %w", err)
+		var m models.MindmapInfo
+		if err := rows.Scan(&m.ID, &m.Name, &m.IsPublic, &m.Owner); err != nil {
+			return nil, fmt.Errorf("failed to scan mindmap row: %w", err)
 		}
 		mindmaps = append(mindmaps, m)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating data rows: %w", err)
+		return nil, fmt.Errorf("error iterating mindmap rows: %w", err)
 	}
 
 	return mindmaps, nil
@@ -141,7 +145,7 @@ func (s *SQLiteMindmapStorage) MindmapPermission(mindmapName string, username st
 		if isPublic != newPublicStatus {
 			_, err = tx.Exec("UPDATE mindmaps SET is_public = ? WHERE name = ?", newPublicStatus, mindmapName)
 			if err != nil {
-				return false, fmt.Errorf("failed to update mindmap access: %w", err)
+				return false, fmt.Errorf("failed to update mindmap permission: %w", err)
 			}
 			isPublic = newPublicStatus
 		}
@@ -154,12 +158,12 @@ func (s *SQLiteMindmapStorage) MindmapPermission(mindmapName string, username st
 	return isOwner || isPublic, nil
 }
 
-func (s *SQLiteMindmapStorage) MindmapGet(mindmapName string) (*MindmapInfo, error) {
-	var info MindmapInfo
-	err := s.db.QueryRow("SELECT name, owner, is_public FROM mindmaps WHERE name = ?", mindmapName).Scan(&info.Name, &info.Owner, &info.IsPublic)
+func (s *SQLiteMindmapStorage) MindmapGet(name string) (*models.MindmapInfo, error) {
+	var info models.MindmapInfo
+	err := s.db.QueryRow("SELECT id, name, owner, is_public FROM mindmaps WHERE name = ?", name).Scan(&info.ID, &info.Name, &info.Owner, &info.IsPublic)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("mindmap '%s' does not exist", mindmapName)
+			return nil, fmt.Errorf("mindmap '%s' does not exist", name)
 		}
 		return nil, fmt.Errorf("failed to get mindmap info: %w", err)
 	}

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"mindnoscape/local-app/internal/ui"
-	"strings"
 )
 
 func (c *CLI) MindmapInfo(args []string) error {
@@ -22,8 +20,7 @@ func (c *CLI) MindmapAdd(args []string) error {
 	}
 
 	name := args[0]
-	isPublic := false // Default to private mindmaps
-	err := c.Data.MindmapManager.MindmapAdd(name, isPublic)
+	var err = c.Data.MindmapManager.MindmapAdd(name, false) // Default to private mindmaps
 	if err != nil {
 		return err
 	}
@@ -32,9 +29,9 @@ func (c *CLI) MindmapAdd(args []string) error {
 	return nil
 }
 
-// MindmapModify handles the 'mindmap mod' command (placeholder)
-func (c *CLI) MindmapModify(args []string) error {
-	c.UI.Info("Mindmap modification functionality is not implemented yet.")
+// MindmapUpdate handles the 'mindmap update' command (placeholder)
+func (c *CLI) MindmapUpdate(args []string) error {
+	c.UI.Info("Mindmap update functionality is not implemented yet.")
 	return nil
 }
 
@@ -80,17 +77,16 @@ func (c *CLI) MindmapPermission(args []string) error {
 	}
 
 	mindmapName := args[0]
-	username := c.Data.UserManager.UserGet()
 
 	// Check permission
 	if len(args) == 1 {
-		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, username)
+		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, nil)
 		if err != nil {
 			return fmt.Errorf("failed to check mindmap permission: %v", err)
 		}
 
 		if hasPermission {
-			c.UI.Success(fmt.Sprintf("You have permission to access mindmap '%s'", mindmapName))
+			c.UI.Info(fmt.Sprintf("You have permission to access mindmap '%s'", mindmapName))
 		} else {
 			c.UI.Info(fmt.Sprintf("You don't have permission to access mindmap '%s'", mindmapName))
 		}
@@ -98,9 +94,9 @@ func (c *CLI) MindmapPermission(args []string) error {
 	}
 
 	// Set permission
-	access := args[1]
+	permission := args[1]
 	var isPublic bool
-	switch access {
+	switch permission {
 	case "public":
 		isPublic = true
 	case "private":
@@ -109,17 +105,17 @@ func (c *CLI) MindmapPermission(args []string) error {
 		return fmt.Errorf("invalid permission option: use 'public' or 'private'")
 	}
 
-	hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, username, isPublic)
+	success, err := c.Data.MindmapManager.MindmapPermission(mindmapName, &isPublic)
 	if err != nil {
-		return fmt.Errorf("failed to update mindmap access: %v", err)
+		return fmt.Errorf("failed to update mindmap permission: %v", err)
 	}
 
-	if !hasPermission {
-		return fmt.Errorf("you don't have permission to modify access for mindmap '%s'", mindmapName)
+	if success {
+		c.UI.Success(fmt.Sprintf("Mindmap '%s' permission set to %s", mindmapName, permission))
+	} else {
+		c.UI.Warning(fmt.Sprintf("Failed to set mindmap '%s' permission to %s", mindmapName, permission))
 	}
-
-	c.UI.Success(fmt.Sprintf("Mindmap '%s' access set to %s", mindmapName, access))
-	return nil
+	return err
 }
 
 // MindmapImport handles the 'mindmap import' command
@@ -192,100 +188,41 @@ func (c *CLI) MindmapList(args []string) error {
 		return fmt.Errorf("failed to retrieve mindmaps: %v", err)
 	}
 
-	if len(mindmaps) == 0 {
-		c.UI.Println("No mindmaps available")
-	} else {
-		c.UI.Println("Available mindmaps:")
-		for _, mm := range mindmaps {
-			accessSymbol := "+"
-			accessColor := ui.ColorGreen
-			if !mm.IsPublic {
-				accessSymbol = "-"
-				accessColor = ui.ColorRed
-			}
-			c.UI.Print(mm.Name + " ")
-			c.UI.PrintColored(accessSymbol, accessColor)
-			if mm.Owner != c.CurrentUser {
-				c.UI.Printf(" (owner: %s)", mm.Owner)
-			}
-			c.UI.Println("")
-		}
-	}
+	c.UI.MindmapUI.MindmapList(mindmaps, c.CurrentUser)
 
 	return nil
 }
 
 // MindmapView handles the 'mindmap view' command
 func (c *CLI) MindmapView(args []string) error {
-	logicalIndex := ""
 	showIndex := false
 
 	for _, arg := range args {
-		if arg == "--index" {
+		if arg == "--id" || arg == "-i" {
 			showIndex = true
-		} else {
-			logicalIndex = arg
 		}
 	}
 
-	output, err := c.Data.MindmapManager.MindmapView(logicalIndex, showIndex)
-	if err != nil {
-		return err
+	// Get the current mindmap
+	mindmap := c.Data.MindmapManager.CurrentMindmap
+	if mindmap == nil {
+		return fmt.Errorf("no mindmap selected")
 	}
 
-	for _, line := range output {
-		c.printColoredLine(line)
+	// Get all nodes of the current mindmap
+	nodes, err := c.Data.NodeManager.NodeGetAll()
+	if err != nil {
+		return fmt.Errorf("failed to get mindmap nodes: %v", err)
 	}
+
+	if len(nodes) == 0 {
+		return fmt.Errorf("no nodes found for the current mindmap")
+	}
+
+	// Use the MindmapUI to visualize the mindmap
+	c.UI.MindmapUI.MindmapView(nodes, showIndex)
 
 	return nil
-}
-
-// To be moved to UI
-func (c *CLI) printColoredLine(line string) {
-	colorMap := map[string]ui.Color{
-		"{{yellow}}":    ui.ColorYellow,
-		"{{orange}}":    ui.ColorOrange,
-		"{{darkbrown}}": ui.ColorDarkBrown,
-		"{{default}}":   ui.ColorDefault,
-	}
-
-	for len(line) > 0 {
-		startIndex := strings.Index(line, "{{")
-		if startIndex == -1 {
-			c.UI.Print(line)
-			break
-		}
-
-		endIndex := strings.Index(line, "}}")
-		if endIndex == -1 {
-			c.UI.Print(line)
-			break
-		}
-
-		// Print the part before the color code
-		if startIndex > 0 {
-			c.UI.Print(line[:startIndex])
-		}
-
-		colorCode := line[startIndex : endIndex+2]
-		color, exists := colorMap[colorCode]
-		if !exists {
-			color = ui.ColorDefault
-		}
-
-		// Find the next color code or the end of the string
-		nextStartIndex := strings.Index(line[endIndex+2:], "{{")
-		if nextStartIndex == -1 {
-			// No more color codes, print the rest of the line
-			c.UI.PrintColored(line[endIndex+2:], color)
-			break
-		} else {
-			// Print the part until the next color code
-			c.UI.PrintColored(line[endIndex+2:endIndex+2+nextStartIndex], color)
-			line = line[endIndex+2+nextStartIndex:]
-		}
-	}
-	c.UI.Println("") // New line at the end
 }
 
 // MindmapConnect handles the 'mindmap connect' command (placeholder)
@@ -304,9 +241,9 @@ func (c *CLI) ExecuteMindmapCommand(args []string) error {
 	switch operation {
 	case "add":
 		return c.MindmapAdd(args[1:])
-	case "mod":
-		return c.MindmapModify(args[1:])
-	case "del":
+	case "update":
+		return c.MindmapUpdate(args[1:])
+	case "delete":
 		return c.MindmapDelete(args[1:])
 	case "permission":
 		return c.MindmapPermission(args[1:])

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	// "mindnoscape/local-app/internal/ui"
 )
 
 func (c *CLI) UserInfo(args []string) error {
@@ -42,8 +43,8 @@ func (c *CLI) UserAdd(args []string) error {
 	return nil
 }
 
-// UserModify handles the 'user mod' command
-func (c *CLI) UserModify(args []string) error {
+// UserUpdate handles the 'user mod' command
+func (c *CLI) UserUpdate(args []string) error {
 	if len(args) < 1 {
 		return fmt.Errorf("usage: user mod <username> [new_username] [new_password]")
 	}
@@ -70,7 +71,7 @@ func (c *CLI) UserModify(args []string) error {
 		}
 	}
 
-	err = c.Data.UserManager.UserModify(username, newUsername, newPassword)
+	err = c.Data.UserManager.UserUpdate(username, newUsername, newPassword)
 	if err != nil {
 		return err
 	}
@@ -159,9 +160,9 @@ func (c *CLI) ExecuteUserCommand(args []string) error {
 	switch operation {
 	case "add":
 		return c.UserAdd(args[1:])
-	case "mod":
-		return c.UserModify(args[1:])
-	case "del":
+	case "update":
+		return c.UserUpdate(args[1:])
+	case "delete":
 		return c.UserDelete(args[1:])
 	case "select":
 		return c.UserSelect(args[1:])

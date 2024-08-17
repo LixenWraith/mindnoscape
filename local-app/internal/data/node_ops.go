@@ -2,21 +2,23 @@ package data
 
 import (
 	"fmt"
-	"mindnoscape/local-app/internal/storage"
 	"sort"
 	"strconv"
 	"strings"
 
 	"mindnoscape/local-app/internal/models"
+	"mindnoscape/local-app/internal/storage"
 )
 
 type NodeOperations interface {
-	NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error
-	NodeDelete(identifier string, useIndex bool) error
-	NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error
-	NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error
+	NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool) error
+	NodeDelete(identifier string, useID bool) error
+	NodeUpdate(identifier string, content string, extra map[string]string, useID bool) error
+	NodeMove(sourceIdentifier, targetIdentifier string, useID bool) error
 	NodeFind(query string, showIndex bool) ([]string, error)
-	NodeSort(identifier string, field string, reverse bool, useIndex bool) error
+	NodeSort(identifier string, field string, reverse bool, useID bool) error
+	NodeGet(ID int) (*models.Node, error)
+	NodeGetAll() ([]*models.Node, error)
 }
 
 type NodeManager struct {
@@ -34,12 +36,16 @@ func NewNodeManager(mm *MindmapManager) *NodeManager {
 	return nm
 }
 
-func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useIndex bool) error {
+func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
-	parentNode, err := nm.findNodeByIndex(parentIdentifier, useIndex)
+	if err := nm.checkOwnership(); err != nil {
+		return err
+	}
+
+	parentNode, err := nm.findNodeByID(parentIdentifier, useID)
 	if err != nil {
 		return fmt.Errorf("failed to find parent node: %w", err)
 	}
@@ -48,35 +54,49 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 		return fmt.Errorf("parent node not found")
 	}
 
-	newIndex := nm.mm.CurrentMindmap.MaxIndex + 1
-	nm.mm.CurrentMindmap.MaxIndex = newIndex
-
-	newNode := models.NewNode(newIndex, content, nm.mm.CurrentMindmap.ID)
+	newNode := models.NewNode(0, content, nm.mm.CurrentMindmap.ID)
 	newNode.Extra = extra
-	newNode.ParentID = parentNode.Index
+	newNode.ParentID = parentNode.ID
 
-	// Assign logical index
-	if parentNode.Index == 0 {
-		newNode.LogicalIndex = fmt.Sprintf("%d", len(parentNode.Children)+1)
+	// Assign index
+	if parentNode.ID == 0 {
+		// For root's children, use the number of existing children + 1
+		newNode.Index = fmt.Sprintf("%d", len(parentNode.Children)+1)
 	} else {
-		newNode.LogicalIndex = fmt.Sprintf("%s.%d", parentNode.LogicalIndex, len(parentNode.Children)+1)
+		// Find the highest index among siblings
+		highestIndex := 0
+		for _, sibling := range parentNode.Children {
+			parts := strings.Split(sibling.Index, ".")
+			if len(parts) > 0 {
+				if lastPart, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+					if lastPart > highestIndex {
+						highestIndex = lastPart
+					}
+				}
+			}
+		}
+		// Increment the highest index for the new node
+		newNode.Index = fmt.Sprintf("%s.%d", parentNode.Index, highestIndex+1)
 	}
 
 	// Add to storage
-	if err := nm.nodeStore.NodeAdd(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.Index, newNode.Content, newNode.Extra, newNode.LogicalIndex); err != nil {
+	newID, err := nm.nodeStore.NodeAdd(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, parentNode.ID, newNode.Content, newNode.Extra, newNode.Index)
+	if err != nil {
 		return fmt.Errorf("failed to add node to storage: %w", err)
 	}
 
+	newNode.ID = newID
+
 	// Update in-memory structure
 	parentNode.Children = append(parentNode.Children, newNode)
-	nm.mm.CurrentMindmap.Nodes[newIndex] = newNode
+	nm.mm.CurrentMindmap.Nodes[newID] = newNode
 
 	// Add to operation history
 	op := Operation{
 		Type: OpAdd,
-		AffectedNode: NodeInfo{
-			Index:    newNode.Index,
-			ParentID: parentNode.Index,
+		AffectedNode: models.NodeInfo{
+			ID:       newNode.ID,
+			ParentID: parentNode.ID,
 		},
 		NewContent: content,
 		NewExtra:   extra,
@@ -86,12 +106,16 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 	return nil
 }
 
-func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
+func (nm *NodeManager) NodeDelete(identifier string, useID bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
-	node, err := nm.findNodeByIndex(identifier, useIndex)
+	if err := nm.checkOwnership(); err != nil {
+		return err
+	}
+
+	node, err := nm.findNodeByID(identifier, useID)
 	if err != nil {
 		return fmt.Errorf("failed to find node to delete: %w", err)
 	}
@@ -110,7 +134,7 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 
 	// Remove from storage
 	for _, n := range deletedTree {
-		if err := nm.nodeStore.NodeDelete(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, n.Index); err != nil {
+		if err := nm.nodeStore.NodeDelete(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, n.ID); err != nil {
 			return fmt.Errorf("failed to delete node from storage: %w", err)
 		}
 	}
@@ -126,17 +150,17 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 	// Delete the node and its descendants recursively
 	nm.deleteNodeRecursive(node)
 
-	// Update logical indexes
-	err = nm.updateSubtreeLogicalIndices(nm.mm.CurrentMindmap.Root)
+	// Update indexes
+	err = nm.updateSubtreeIndex(nm.mm.CurrentMindmap.Root)
 	if err != nil {
-		return fmt.Errorf("failed to update logical indexes after deletion: %w", err)
+		return fmt.Errorf("failed to update indexes after deletion: %w", err)
 	}
 
 	// Add to operation history
 	op := Operation{
 		Type: OpDelete,
-		AffectedNode: NodeInfo{
-			Index:    node.Index,
+		AffectedNode: models.NodeInfo{
+			ID:       node.ID,
 			ParentID: node.ParentID,
 		},
 		DeletedTree: deletedTree,
@@ -146,14 +170,18 @@ func (nm *NodeManager) NodeDelete(identifier string, useIndex bool) error {
 	return nil
 }
 
-func (nm *NodeManager) NodeModify(identifier string, content string, extra map[string]string, useIndex bool) error {
+func (nm *NodeManager) NodeUpdate(identifier string, content string, extra map[string]string, useID bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
-	node, err := nm.findNodeByIndex(identifier, useIndex)
+	if err := nm.checkOwnership(); err != nil {
+		return err
+	}
+
+	node, err := nm.findNodeByID(identifier, useID)
 	if err != nil {
-		return fmt.Errorf("failed to find node to modify: %w", err)
+		return fmt.Errorf("failed to find node to update: %w", err)
 	}
 
 	if node == nil {
@@ -178,15 +206,15 @@ func (nm *NodeManager) NodeModify(identifier string, content string, extra map[s
 	}
 
 	// Update in storage
-	if err := nm.nodeStore.NodeModify(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, node.Index, node.Content, node.Extra, node.LogicalIndex); err != nil {
+	if err := nm.nodeStore.NodeUpdate(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, node.ID, node.Content, node.Extra, node.Index); err != nil {
 		return fmt.Errorf("failed to update node in storage: %w", err)
 	}
 
 	// Add to operation history
 	op := Operation{
-		Type: OpModify,
-		AffectedNode: NodeInfo{
-			Index: node.Index,
+		Type: OpUpdate,
+		AffectedNode: models.NodeInfo{
+			ID: node.ID,
 		},
 		OldContent: oldContent,
 		NewContent: content,
@@ -198,17 +226,21 @@ func (nm *NodeManager) NodeModify(identifier string, content string, extra map[s
 	return nil
 }
 
-func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIndex bool) error {
+func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useID bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
-	sourceNode, err := nm.findNodeByIndex(sourceIdentifier, useIndex)
+	if err := nm.checkOwnership(); err != nil {
+		return err
+	}
+
+	sourceNode, err := nm.findNodeByID(sourceIdentifier, useID)
 	if err != nil {
 		return fmt.Errorf("failed to find source node: %w", err)
 	}
 
-	targetNode, err := nm.findNodeByIndex(targetIdentifier, useIndex)
+	targetNode, err := nm.findNodeByID(targetIdentifier, useID)
 	if err != nil {
 		return fmt.Errorf("failed to find target node: %w", err)
 	}
@@ -234,39 +266,43 @@ func (nm *NodeManager) NodeMove(sourceIdentifier, targetIdentifier string, useIn
 
 	// Add to new parent
 	targetNode.Children = append(targetNode.Children, sourceNode)
-	sourceNode.ParentID = targetNode.Index
+	sourceNode.ParentID = targetNode.ID
 
 	// Update in storage
-	if err := nm.nodeStore.NodeMove(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, sourceNode.Index, targetNode.Index); err != nil {
+	if err := nm.nodeStore.NodeMove(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, sourceNode.ID, targetNode.ID); err != nil {
 		return fmt.Errorf("failed to move node in storage: %w", err)
 	}
 
-	// Update logical indexes starting from the root
-	err = nm.updateSubtreeLogicalIndices(nm.mm.CurrentMindmap.Root)
+	// Update indexes starting from the root
+	err = nm.updateSubtreeIndex(nm.mm.CurrentMindmap.Root)
 	if err != nil {
-		return fmt.Errorf("failed to update logical indexes after move: %w", err)
+		return fmt.Errorf("failed to update indexes after move: %w", err)
 	}
 
 	// Add to operation history
 	op := Operation{
 		Type: OpMove,
-		AffectedNode: NodeInfo{
-			Index: sourceNode.Index,
+		AffectedNode: models.NodeInfo{
+			ID: sourceNode.ID,
 		},
 		OldParentID: oldParentID,
-		NewParentID: targetNode.Index,
+		NewParentID: targetNode.ID,
 	}
 	nm.historyManager.HistoryAdd(op)
 
 	return nil
 }
 
-func (nm *NodeManager) NodeFind(query string, showIndex bool) ([]string, error) {
+func (nm *NodeManager) NodeFind(query string) ([]*models.Node, error) {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return nil, fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 
-	matches := []*models.Node{}
+	if !nm.mm.CurrentMindmap.IsPublic && nm.mm.CurrentMindmap.Owner != nm.mm.CurrentUser {
+		return nil, fmt.Errorf("you don't have permission to view this mindmap")
+	}
+
+	var matches []*models.Node
 	for _, node := range nm.mm.CurrentMindmap.Nodes {
 		if strings.Contains(strings.ToLower(node.Content), strings.ToLower(query)) {
 			matches = append(matches, node)
@@ -280,23 +316,16 @@ func (nm *NodeManager) NodeFind(query string, showIndex bool) ([]string, error) 
 		}
 	}
 
-	if len(matches) == 0 {
-		return []string{"No matches found."}, nil
-	}
-
-	output := []string{fmt.Sprintf("Found %d matches:", len(matches))}
-	visualOutput, err := nm.visualizeNode(matches, showIndex)
-	if err != nil {
-		return nil, fmt.Errorf("failed to visualize nodes: %w", err)
-	}
-	output = append(output, visualOutput...)
-
-	return output, nil
+	return matches, nil
 }
 
-func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, useIndex bool) error {
+func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, useID bool) error {
 	if err := nm.ensureCurrentMindmap(); err != nil {
 		return fmt.Errorf("failed to ensure current mindmap: %w", err)
+	}
+
+	if err := nm.checkOwnership(); err != nil {
+		return err
 	}
 
 	var node *models.Node
@@ -305,7 +334,7 @@ func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, u
 	if identifier == "" {
 		node = nm.mm.CurrentMindmap.Root
 	} else {
-		node, err = nm.findNodeByIndex(identifier, useIndex)
+		node, err = nm.findNodeByID(identifier, useID)
 		if err != nil {
 			return fmt.Errorf("failed to find node to sort: %w", err)
 		}
@@ -316,12 +345,15 @@ func (nm *NodeManager) NodeSort(identifier string, field string, reverse bool, u
 	}
 
 	// Sort the entire subtree
-	nm.sortNodeSubtreeRecursively(node, field, reverse)
+	sortedChildren := nm.sortNodeSubtreeRecursively(node, field, reverse)
 
-	// Update logical indices in memory and database
-	err = nm.updateSubtreeLogicalIndices(node)
+	// Update the node's children with the sorted children
+	node.Children = sortedChildren
+
+	// Update indices in memory and database
+	err = nm.updateSubtreeIndex(nm.mm.CurrentMindmap.Root)
 	if err != nil {
-		return fmt.Errorf("failed to update logical indices and persist changes after sorting: %w", err)
+		return fmt.Errorf("failed to update index after sorting: %w", err)
 	}
 
 	return nil
@@ -339,8 +371,7 @@ func (nm *NodeManager) NodeReset() {
 	nm.historyManager.HistoryReset()
 }
 
-func (nm *NodeManager) sortNodeSubtreeRecursively(node *models.Node, field string, reverse bool) {
-	// Sort the children of this node
+func (nm *NodeManager) sortNodeSubtreeRecursively(node *models.Node, field string, reverse bool) []*models.Node {
 	sort.Slice(node.Children, func(i, j int) bool {
 		var vi, vj string
 		if field == "" {
@@ -374,36 +405,36 @@ func (nm *NodeManager) sortNodeSubtreeRecursively(node *models.Node, field strin
 
 	// Recursively sort children of children
 	for _, child := range node.Children {
-		nm.sortNodeSubtreeRecursively(child, field, reverse)
+		child.Children = nm.sortNodeSubtreeRecursively(child, field, reverse)
 	}
+
+	return node.Children
 }
 
-func (nm *NodeManager) visualizeNode(nodes []*models.Node, showIndex bool) ([]string, error) {
-	var output []string
-
-	for _, node := range nodes {
-		var line strings.Builder
-
-		line.WriteString(fmt.Sprintf("%s%s%s ", string(ColorYellow), node.LogicalIndex, string(ColorDefault)))
-		line.WriteString(node.Content)
-		if showIndex {
-			line.WriteString(fmt.Sprintf(" %s[%d]%s", string(ColorOrange), node.Index, string(ColorDefault)))
-		}
-
-		// Add extra fields
-		if len(node.Extra) > 0 {
-			var extraFields []string
-			for k, v := range node.Extra {
-				extraFields = append(extraFields, fmt.Sprintf("%s:%s", k, v))
-			}
-			sort.Strings(extraFields) // Sort extra fields for consistent output
-			line.WriteString(" " + strings.Join(extraFields, ", "))
-		}
-
-		output = append(output, line.String())
+func (nm *NodeManager) NodeGet(ID int) ([]*models.Node, error) {
+	if nm.mm.CurrentMindmap == nil {
+		return nil, fmt.Errorf("no mindmap selected")
 	}
 
-	return output, nil
+	node, err := nm.nodeStore.NodeGet(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node: %w", err)
+	}
+
+	return node, nil
+}
+
+func (nm *NodeManager) NodeGetAll() ([]*models.Node, error) {
+	if nm.mm.CurrentMindmap == nil {
+		return nil, fmt.Errorf("no mindmap selected")
+	}
+
+	node, err := nm.nodeStore.NodeGetAll(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node: %w", err)
+	}
+
+	return node, nil
 }
 
 // Helper functions that were previously in the MindmapManager but are now part of NodeManager
@@ -415,34 +446,44 @@ func (nm *NodeManager) ensureCurrentMindmap() error {
 	return nil
 }
 
-func (nm *NodeManager) findNodeByIndex(identifier string, useIndex bool) (*models.Node, error) {
-	if useIndex {
+func (nm *NodeManager) checkOwnership() error {
+	if nm.mm.CurrentMindmap == nil {
+		return fmt.Errorf("no mindmap selected")
+	}
+	if nm.mm.CurrentMindmap.Owner != nm.mm.CurrentUser {
+		return fmt.Errorf("you don't have permission to modify this mindmap")
+	}
+	return nil
+}
+
+func (nm *NodeManager) findNodeByID(identifier string, useID bool) (*models.Node, error) {
+	if useID {
 		index, err := strconv.Atoi(identifier)
 		if err != nil {
 			return nil, fmt.Errorf("invalid index: %w", err)
 		}
 		return nm.mm.CurrentMindmap.Nodes[index], nil
 	}
-	return nm.findNodeByLogicalIndex(identifier)
+	return nm.findNodeByIndex(identifier) // TODO: this doesn't make sense anymore should does it itself
 }
 
-func (nm *NodeManager) findNodeByLogicalIndex(logicalIndex string) (*models.Node, error) {
-	if logicalIndex == "0" {
+func (nm *NodeManager) findNodeByIndex(Index string) (*models.Node, error) {
+	if Index == "0" {
 		return nm.mm.CurrentMindmap.Root, nil
 	}
 
-	parts := strings.Split(logicalIndex, ".")
+	parts := strings.Split(Index, ".")
 	currentNode := nm.mm.CurrentMindmap.Root
 
 	for _, part := range parts {
-		index, err := strconv.Atoi(part)
+		ID, err := strconv.Atoi(part)
 		if err != nil {
-			return nil, fmt.Errorf("invalid logical index part '%s': %w", part, err)
+			return nil, fmt.Errorf("invalid index part '%s': %w", part, err)
 		}
-		if index < 1 || index > len(currentNode.Children) {
-			return nil, fmt.Errorf("invalid logical index: part %s is out of range", part)
+		if ID < 1 || ID > len(currentNode.Children) {
+			return nil, fmt.Errorf("invalid index: part %s is out of range", part)
 		}
-		currentNode = currentNode.Children[index-1]
+		currentNode = currentNode.Children[ID-1]
 	}
 
 	return currentNode, nil
@@ -459,49 +500,34 @@ func (nm *NodeManager) deleteNodeRecursive(node *models.Node) {
 	for _, child := range node.Children {
 		nm.deleteNodeRecursive(child)
 	}
-	delete(nm.mm.CurrentMindmap.Nodes, node.Index)
+	delete(nm.mm.CurrentMindmap.Nodes, node.ID)
 }
 
-func (nm *NodeManager) updateSubtreeLogicalIndices(node *models.Node) error {
-	fmt.Println(node)
+func (nm *NodeManager) updateSubtreeIndex(node *models.Node) error {
 	var recalculate func(*models.Node, string) error
 	recalculate = func(n *models.Node, parentIndex string) error {
 		for i, child := range n.Children {
-			var newLogicalIndex string
+			var newIndex string
 			if parentIndex == "0" {
-				newLogicalIndex = fmt.Sprintf("%d", i+1)
+				newIndex = fmt.Sprintf("%d", i+1)
 			} else {
-				newLogicalIndex = fmt.Sprintf("%s.%d", parentIndex, i+1)
+				newIndex = fmt.Sprintf("%s.%d", parentIndex, i+1)
 			}
 
-			if child.LogicalIndex != newLogicalIndex {
-				child.LogicalIndex = newLogicalIndex
-				err := nm.updateNodeLogicalIndex(child.Index, child.LogicalIndex)
+			if child.Index != newIndex {
+				child.Index = newIndex
+				err := nm.nodeStore.NodeOrderUpdate(nm.mm.CurrentMindmap.Name, nm.mm.CurrentUser, child.ID, child.Index)
 				if err != nil {
-					return fmt.Errorf("failed to update logical index for node %d: %w", child.Index, err)
+					return fmt.Errorf("failed to update index for node %s: %w", child.Index, err)
 				}
 			}
 
-			if err := recalculate(child, child.LogicalIndex); err != nil {
+			if err := recalculate(child, child.Index); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	return recalculate(node, node.LogicalIndex)
-}
-
-func (nm *NodeManager) updateNodeLogicalIndex(nodeID int, logicalIndex string) error {
-	if err := nm.ensureCurrentMindmap(); err != nil {
-		return err
-	}
-
-	mindmapName := nm.mm.CurrentMindmap.Name
-	err := nm.nodeStore.NodeOrderUpdate(mindmapName, nm.mm.CurrentUser, nodeID, logicalIndex)
-	if err != nil {
-		return fmt.Errorf("failed to update node order in database: %w", err)
-	}
-
-	return nil
+	return recalculate(node, node.Index)
 }

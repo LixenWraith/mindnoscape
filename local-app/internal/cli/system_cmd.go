@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	//	"mindnoscape/local-app/internal/ui"
 )
 
 // SystemExit handles the 'system exit' command

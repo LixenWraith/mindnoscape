@@ -13,54 +13,24 @@ import (
 
 var ErrInterrupted = errors.New("interrupted")
 
-type Color string
-
-const (
-	ColorDefault     Color = "\033[0m"
-	ColorBlack       Color = "\033[38;2;0;0;0m"
-	ColorDarkGray    Color = "\033[38;2;100;100;100m"
-	ColorGray        Color = "\033[38;2;150;150;150m"
-	ColorWhite       Color = "\033[38;2;255;255;255m"
-	ColorBrightWhite Color = "\033[38;2;255;255;255;1m"
-
-	ColorLightRed Color = "\033[38;2;255;150;150m"
-	ColorRed      Color = "\033[38;2;255;0;0m"
-	ColorDarkRed  Color = "\033[38;2;150;0;0m"
-
-	ColorLightGreen Color = "\033[38;2;150;255;150m"
-	ColorGreen      Color = "\033[38;2;0;255;0m"
-	ColorDarkGreen  Color = "\033[38;2;0;150;0m"
-
-	ColorLightYellow Color = "\033[38;2;255;255;150m"
-	ColorYellow      Color = "\033[38;2;255;255;0m"
-	ColorDarkYellow  Color = "\033[38;2;150;150;0m"
-
-	ColorLightBlue Color = "\033[38;2;150;150;255m"
-	ColorBlue      Color = "\033[38;2;0;0;255m"
-	ColorDarkBlue  Color = "\033[38;2;0;0;150m"
-
-	ColorLightBrown Color = "\033[38;2;210;180;140m"
-	ColorBrown      Color = "\033[38;2;165;42;42m"
-	ColorDarkBrown  Color = "\033[38;2;101;67;33m"
-
-	ColorLightPurple Color = "\033[38;2;200;150;255m"
-	ColorPurple      Color = "\033[38;2;128;0;128m"
-	ColorDarkPurple  Color = "\033[38;2;75;0;130m"
-
-	ColorLightOrange Color = "\033[38;2;255;200;150m"
-	ColorOrange      Color = "\033[38;2;255;165;0m"
-	ColorDarkOrange  Color = "\033[38;2;255;140;0m"
-
-	ColorPink Color = "\033[38;2;255;192;203m"
-)
-
 type UI struct {
 	writer   io.Writer
 	useColor bool
+	//	SystemUI *SystemUI
+	UserUI    *UserUI
+	MindmapUI *MindmapUI
+	NodeUI    *NodeUI
 }
 
 func NewUI(w io.Writer, useColor bool) *UI {
-	return &UI{writer: w, useColor: useColor}
+	return &UI{
+		writer:   w,
+		useColor: useColor,
+		//		SystemUI: NewSystemUI(w, useColor),
+		UserUI:    NewUserUI(w, useColor),
+		MindmapUI: NewMindmapUI(w, useColor),
+		NodeUI:    NewNodeUI(w, useColor),
+	}
 }
 
 func (u *UI) colorize(message string, color Color) string {
@@ -118,10 +88,6 @@ func (u *UI) GetPromptString(user, mindmap string) string {
 	}
 	promptBuilder.WriteString(u.colorize("> ", ColorGreen))
 	return promptBuilder.String()
-}
-
-func (u *UI) PrintCommand(command string) {
-	u.PrintlnColored(command, ColorWhite)
 }
 
 func (u *UI) ReadLine(prompt string) (string, error) {
@@ -231,10 +197,4 @@ func (u *UI) visibleLength(s string) int {
 		}
 	}
 	return visible
-}
-
-func (u *UI) redrawLine(remaining []byte) {
-	u.Print("\x1b[K") // Clear line from cursor to end
-	u.Print(string(remaining))
-	u.Print("\x1b[" + fmt.Sprintf("%d", len(remaining)) + "D") // Move cursor back
 }

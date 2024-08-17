@@ -6,13 +6,6 @@ import (
 	"mindnoscape/local-app/internal/storage"
 )
 
-const (
-	ColorYellow    = "{{yellow}}"
-	ColorOrange    = "{{orange}}"
-	ColorDarkBrown = "{{darkbrown}}"
-	ColorDefault   = "{{default}}"
-)
-
 // Manager is the main struct that coordinates all data operations
 type Manager struct {
 	UserManager    *UserManager

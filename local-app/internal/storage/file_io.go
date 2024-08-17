@@ -2,9 +2,8 @@ package storage
 
 import (
 	"fmt"
-	"os"
-
 	"mindnoscape/local-app/internal/models"
+	"os"
 
 	"encoding/json"
 	"encoding/xml"
@@ -58,65 +57,66 @@ func FileExport(mindmapStore MindmapStore, nodeStore NodeStore, mindmapName, use
 	return nil
 }
 
-func FileImport(mindmapStore MindmapStore, nodeStore NodeStore, username, filename, format string) error {
+func FileImport(mindmapStore MindmapStore, nodeStore NodeStore, username, filename, format string) (*models.Mindmap, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	var root *models.Node
+	var importedMindmap *models.Mindmap
 	switch format {
 	case "json":
-		var mindmap models.Mindmap
-		err = json.Unmarshal(data, &mindmap)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal JSON: %w", err)
-		}
-		root = mindmap.Root
+		err = json.Unmarshal(data, &importedMindmap)
 	case "xml":
-		root, err = unmarshalFromXML(data)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal XML: %w", err)
-		}
+		err = xml.Unmarshal(data, &importedMindmap)
 	default:
-		return fmt.Errorf("unsupported format: %s", format)
+		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
-
-	mindmapName := root.Content
-
-	// Check if the mindmap exists
-	exists, err := mindmapStore.MindmapExists(mindmapName, username)
 	if err != nil {
-		return fmt.Errorf("failed to check if mindmap exists: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal data: %w", err)
 	}
 
-	// If the mindmap doesn't exist, create it
-	if !exists {
-		_, err = mindmapStore.MindmapAdd(mindmapName, username, false) // Use username and set isPublic to false
+	// Check if a mindmap with the same name exists and delete it
+	_, err = mindmapStore.MindmapGet(importedMindmap.Name)
+	if err == nil {
+		// Mindmap exists, delete it
+		err = mindmapStore.MindmapDelete(importedMindmap.Name, username)
 		if err != nil {
-			return fmt.Errorf("failed to create mindmap: %w", err)
+			return nil, fmt.Errorf("failed to delete existing mindmap: %w", err)
 		}
-	} else {
-		// If it exists, delete all existing nodes
-		nodes, err := nodeStore.NodeGetAll(mindmapName, username)
+	}
+
+	// Create new mindmap
+	mindmapID, err := mindmapStore.MindmapAdd(importedMindmap.Name, username, false) // Set as private
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mindmap: %w", err)
+	}
+
+	// Insert nodes
+	var insertNode func(*models.Node, int) error
+	insertNode = func(node *models.Node, parentID int) error {
+		newID, err := nodeStore.NodeAdd(importedMindmap.Name, username, parentID, node.Content, node.Extra, node.Index)
 		if err != nil {
-			return fmt.Errorf("failed to get existing nodes: %w", err)
+			return fmt.Errorf("failed to insert node: %w", err)
 		}
-		for _, node := range nodes {
-			err = nodeStore.NodeDelete(mindmapName, username, node.Index)
-			if err != nil {
-				return fmt.Errorf("failed to delete existing node: %w", err)
+		node.ID = newID
+		for _, child := range node.Children {
+			if err := insertNode(child, newID); err != nil {
+				return err
 			}
 		}
+		return nil
 	}
 
-	// Insert new nodes
-	err = insertNodeRecursive(nodeStore, mindmapName, username, root, -1)
-	if err != nil {
-		return fmt.Errorf("failed to insert nodes for mindmap '%s': %w", mindmapName, err)
+	if err := insertNode(importedMindmap.Root, -1); err != nil {
+		return nil, err
 	}
 
-	return nil
+	importedMindmap.Owner = username
+	importedMindmap.IsPublic = false
+	importedMindmap.ID = mindmapID
+
+	return importedMindmap, nil
 }
 
 func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
@@ -124,8 +124,8 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 	var root *models.Node
 
 	for _, node := range nodes {
-		nodeMap[node.Index] = node
-		if node.Index == 0 || node.ParentID == -1 || node.LogicalIndex == "0" {
+		nodeMap[node.ID] = node
+		if node.ID == 0 || node.ParentID == -1 || node.Index == "0" {
 			root = node
 		}
 	}
@@ -138,29 +138,13 @@ func buildTreeFromNodes(nodes []*models.Node) (*models.Node, error) {
 		if node != root {
 			parent, exists := nodeMap[node.ParentID]
 			if !exists {
-				return nil, fmt.Errorf("parent node not found for node %d (content: %s, logical index: %s)", node.Index, node.Content, node.LogicalIndex)
+				return nil, fmt.Errorf("parent node not found for node %d (content: %s, index: %s)", node.Index, node.Content, node.Index)
 			}
 			parent.Children = append(parent.Children, node)
 		}
 	}
 
 	return root, nil
-}
-
-func insertNodeRecursive(nodeStore NodeStore, mindmapName string, username string, node *models.Node, parentID int) error {
-	err := nodeStore.NodeAdd(mindmapName, username, parentID, node.Content, node.Extra, node.LogicalIndex)
-	if err != nil {
-		return err
-	}
-
-	for _, child := range node.Children {
-		err = insertNodeRecursive(nodeStore, mindmapName, username, child, node.Index)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // marshalToXML converts a Node structure to XML format.
@@ -171,21 +155,21 @@ func marshalToXML(root *models.Node) ([]byte, error) {
 		Value string `xml:",chardata"`
 	}
 	type xmlNode struct {
-		Index        int        `xml:"index,attr"`
-		ParentID     int        `xml:"parent_id,attr"`
-		Content      string     `xml:"content"`
-		LogicalIndex string     `xml:"logical_index,attr"`
-		Children     []xmlNode  `xml:"children>node,omitempty"`
-		Extra        []xmlField `xml:"extra>field,omitempty"`
+		ID       int        `xml:"id,attr"`
+		ParentID int        `xml:"parent_id,attr"`
+		Content  string     `xml:"content"`
+		Index    string     `xml:"index,attr"`
+		Children []xmlNode  `xml:"children>node,omitempty"`
+		Extra    []xmlField `xml:"extra>field,omitempty"`
 	}
 
 	var convertToXMLNode func(*models.Node) xmlNode
 	convertToXMLNode = func(n *models.Node) xmlNode {
 		xn := xmlNode{
-			Index:        n.Index,
-			ParentID:     n.ParentID,
-			Content:      n.Content,
-			LogicalIndex: n.LogicalIndex,
+			ID:       n.ID,
+			ParentID: n.ParentID,
+			Content:  n.Content,
+			Index:    n.Index,
 		}
 		for k, v := range n.Extra {
 			xn.Extra = append(xn.Extra, xmlField{Key: k, Value: v})
@@ -208,12 +192,12 @@ func unmarshalFromXML(data []byte) (*models.Node, error) {
 		Value string `xml:",chardata"`
 	}
 	type xmlNode struct {
-		Index        int        `xml:"index,attr"`
-		ParentID     int        `xml:"parent_id,attr"`
-		Content      string     `xml:"content"`
-		LogicalIndex string     `xml:"logical_index,attr"`
-		Children     []xmlNode  `xml:"children>node,omitempty"`
-		Extra        []xmlField `xml:"extra>field,omitempty"`
+		ID       int        `xml:"id,attr"`
+		ParentID int        `xml:"parent_id,attr"`
+		Content  string     `xml:"content"`
+		Index    string     `xml:"index,attr"`
+		Children []xmlNode  `xml:"children>node,omitempty"`
+		Extra    []xmlField `xml:"extra>field,omitempty"`
 	}
 
 	var xmlRoot xmlNode
@@ -225,11 +209,11 @@ func unmarshalFromXML(data []byte) (*models.Node, error) {
 	var convertFromXMLNode func(xmlNode) *models.Node
 	convertFromXMLNode = func(xn xmlNode) *models.Node {
 		n := &models.Node{
-			Index:        xn.Index,
-			ParentID:     xn.ParentID,
-			Content:      xn.Content,
-			LogicalIndex: xn.LogicalIndex,
-			Extra:        make(map[string]string),
+			ID:       xn.ID,
+			ParentID: xn.ParentID,
+			Content:  xn.Content,
+			Index:    xn.Index,
+			Extra:    make(map[string]string),
 		}
 		for _, field := range xn.Extra {
 			n.Extra[field.Key] = field.Value

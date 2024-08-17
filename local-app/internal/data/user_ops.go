@@ -11,7 +11,7 @@ import (
 type UserOperations interface {
 	UserAdd(username, password string) error
 	UserDelete(username string) error
-	UserModify(oldUsername, newUsername, newPassword string) error
+	UserUpdate(oldUsername, newUsername, newPassword string) error
 	UserAuthenticate(username, password string) (bool, error)
 	UserSelect(username string) error
 	UserReset()
@@ -84,7 +84,7 @@ func (um *UserManager) UserDelete(username string) error {
 	return nil
 }
 
-func (um *UserManager) UserModify(oldUsername, newUsername, newPassword string) error {
+func (um *UserManager) UserUpdate(oldUsername, newUsername, newPassword string) error {
 	// Check if the old username exists
 	exists, err := um.store.UserExists(oldUsername)
 	if err != nil {
@@ -110,7 +110,7 @@ func (um *UserManager) UserModify(oldUsername, newUsername, newPassword string) 
 		return fmt.Errorf("cannot change password for default user")
 	}
 
-	err = um.store.UserModify(oldUsername, newUsername, newPassword)
+	err = um.store.UserUpdate(oldUsername, newUsername, newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}

@@ -13,23 +13,18 @@ const (
 	OpAdd    OperationType = "Add"
 	OpDelete OperationType = "Delete"
 	OpMove   OperationType = "Move"
-	OpModify OperationType = "Modify"
+	OpUpdate OperationType = "Update"
 )
-
-type NodeInfo struct {
-	Index    int
-	ParentID int
-}
 
 type Operation struct {
 	Type         OperationType
-	AffectedNode NodeInfo
+	AffectedNode models.NodeInfo
 	OldParentID  int               // Used for Move
 	NewParentID  int               // Used for Move
-	OldContent   string            // Used for Modify
-	NewContent   string            // Used for Modify and Add
-	OldExtra     map[string]string // Used for Modify
-	NewExtra     map[string]string // Used for Modify and Add
+	OldContent   string            // Used for Update
+	NewContent   string            // Used for Update and Add
+	OldExtra     map[string]string // Used for Update
+	NewExtra     map[string]string // Used for Update and Add
 	DeletedTree  []*models.Node    // Used for Delete to store the entire deleted subtree
 }
 
@@ -72,15 +67,15 @@ func (hm *HistoryManager) Undo() error {
 	switch op.Type {
 	case OpAdd:
 
-		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
+		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.ID), true)
 	case OpDelete:
 
 		err = hm.restoreSubtree(op.DeletedTree)
 	case OpMove:
 
-		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.OldParentID), true)
-	case OpModify:
-		err = hm.nm.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.OldContent, op.OldExtra, true)
+		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.ID), strconv.Itoa(op.OldParentID), true)
+	case OpUpdate:
+		err = hm.nm.NodeUpdate(strconv.Itoa(op.AffectedNode.ID), op.OldContent, op.OldExtra, true)
 	}
 
 	if err != nil {
@@ -105,12 +100,12 @@ func (hm *HistoryManager) Redo() error {
 		err = hm.nm.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true)
 	case OpDelete:
 
-		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.Index), true)
+		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.ID), true)
 	case OpMove:
 
-		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.Index), strconv.Itoa(op.NewParentID), true)
-	case OpModify:
-		err = hm.nm.NodeModify(strconv.Itoa(op.AffectedNode.Index), op.NewContent, op.NewExtra, true)
+		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.ID), strconv.Itoa(op.NewParentID), true)
+	case OpUpdate:
+		err = hm.nm.NodeUpdate(strconv.Itoa(op.AffectedNode.ID), op.NewContent, op.NewExtra, true)
 	}
 
 	if err != nil {

@@ -24,7 +24,7 @@ func (c *CLI) NodeInfo(args []string) error {
 // NodeAdd handles the 'node add' command
 func (c *CLI) NodeAdd(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: node add <parent> <content> [<extra field label>:<extra field value>]... [--index]")
+		return fmt.Errorf("usage: node add <parent> <content> [<extra field label>:<extra field value>]... [--id]")
 	}
 
 	parentIdentifier := args[0]
@@ -33,7 +33,7 @@ func (c *CLI) NodeAdd(args []string) error {
 	useIndex := false
 
 	for _, arg := range args[2:] {
-		if arg == "--index" {
+		if arg == "--id" || arg == "-i" {
 			useIndex = true
 		} else {
 			parts := strings.SplitN(arg, ":", 2)
@@ -52,10 +52,10 @@ func (c *CLI) NodeAdd(args []string) error {
 	return nil
 }
 
-// NodeModify handles the 'node mod' command
-func (c *CLI) NodeModify(args []string) error {
+// NodeUpdate handles the 'node mod' command
+func (c *CLI) NodeUpdate(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: node mod <node> <content> [<extra field label>:<extra field value>]... [--index]")
+		return fmt.Errorf("usage: node mod <node> <content> [<extra field label>:<extra field value>]... [-i]")
 	}
 
 	identifier := args[0]
@@ -64,7 +64,7 @@ func (c *CLI) NodeModify(args []string) error {
 	useIndex := false
 
 	for i := 2; i < len(args); i++ {
-		if args[i] == "--index" {
+		if args[i] == "-i" {
 			useIndex = true
 		} else {
 			parts := strings.SplitN(args[i], ":", 2)
@@ -74,7 +74,7 @@ func (c *CLI) NodeModify(args []string) error {
 		}
 	}
 
-	err := c.Data.NodeManager.NodeModify(identifier, content, extra, useIndex)
+	err := c.Data.NodeManager.NodeUpdate(identifier, content, extra, useIndex)
 	if err != nil {
 		return err
 	}
@@ -86,14 +86,14 @@ func (c *CLI) NodeModify(args []string) error {
 // NodeMove handles the 'node move' command
 func (c *CLI) NodeMove(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: node move <source> <target> [--index]")
+		return fmt.Errorf("usage: node move <source> <target> [--id]")
 	}
 
 	sourceIdentifier := args[0]
 	targetIdentifier := args[1]
 	useIndex := false
 
-	if len(args) > 2 && args[2] == "--index" {
+	if len(args) > 2 && (args[2] == "--id" || args[2] == "-i") {
 		useIndex = true
 	}
 
@@ -109,13 +109,13 @@ func (c *CLI) NodeMove(args []string) error {
 // NodeDelete handles the 'node del' command
 func (c *CLI) NodeDelete(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: node del <node> [--index]")
+		return fmt.Errorf("usage: node del <node> [-index]")
 	}
 
 	identifier := args[0]
 	useIndex := false
 
-	if len(args) > 1 && args[1] == "--index" {
+	if len(args) > 1 && (args[1] == "--id" || args[1] == "-i") {
 		useIndex = true
 	}
 
@@ -131,13 +131,13 @@ func (c *CLI) NodeDelete(args []string) error {
 // NodeFind handles the 'node find' command
 func (c *CLI) NodeFind(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: node find <query> [--index]")
+		return fmt.Errorf("usage: node find <query> [--id]")
 	}
 
 	query := args[0]
 	showIndex := false
 
-	if len(args) > 1 && args[1] == "--index" {
+	if len(args) > 1 && (args[1] == "--id" || args[1] == "-i") {
 		showIndex = true
 	}
 
@@ -146,14 +146,12 @@ func (c *CLI) NodeFind(args []string) error {
 		query = query[1 : len(query)-1]
 	}
 
-	output, err := c.Data.NodeManager.NodeFind(query, showIndex)
+	matches, err := c.Data.NodeManager.NodeFind(query)
 	if err != nil {
 		return fmt.Errorf("failed to find nodes: %v", err)
 	}
 
-	for _, line := range output {
-		c.UI.Println(line)
-	}
+	c.UI.NodeUI.NodeFind(matches, showIndex)
 
 	return nil
 }
@@ -179,9 +177,9 @@ func (c *CLI) NodeSort(args []string) error {
 	for i := 0; i < len(args); i++ {
 		arg := strings.ToLower(args[i])
 		switch arg {
-		case "--reverse":
+		case "--reverse", "-r":
 			reverse = true
-		case "--index":
+		case "--id", "-i":
 			useIndex = true
 		default:
 			if identifier == "" {
@@ -245,11 +243,11 @@ func (c *CLI) ExecuteNodeCommand(args []string) error {
 	switch operation {
 	case "add":
 		return c.NodeAdd(args[1:])
-	case "mod":
-		return c.NodeModify(args[1:])
+	case "update":
+		return c.NodeUpdate(args[1:])
 	case "move":
 		return c.NodeMove(args[1:])
-	case "del":
+	case "delete":
 		return c.NodeDelete(args[1:])
 	case "find":
 		return c.NodeFind(args[1:])
@@ -259,7 +257,7 @@ func (c *CLI) ExecuteNodeCommand(args []string) error {
 		return c.NodeList(args[1:])
 	case "sort":
 		return c.NodeSort(args[1:])
-	case "link":
+	case "connect":
 		return c.NodeConnect(args[1:])
 	case "undo":
 		return c.NodeUndo(args[1:])

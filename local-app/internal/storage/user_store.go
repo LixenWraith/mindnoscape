@@ -14,7 +14,7 @@ type UserStore interface {
 	UserDelete(username string) error
 	UserExists(username string) (bool, error)
 	UserGet(username string) (*models.User, error)
-	UserModify(oldUsername, newUsername, newHashedPassword string) error
+	UserUpdate(oldUsername, newUsername, newHashedPassword string) error
 	UserAuthenticate(username, password string) (bool, error)
 }
 
@@ -87,7 +87,7 @@ func (s *SQLiteUserStorage) UserGet(username string) (*models.User, error) {
 	return user, nil
 }
 
-func (s *SQLiteUserStorage) UserModify(oldUsername, newUsername, newPassword string) error {
+func (s *SQLiteUserStorage) UserUpdate(oldUsername, newUsername, newPassword string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

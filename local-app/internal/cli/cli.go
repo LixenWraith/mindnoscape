@@ -233,10 +233,10 @@ func (c *CLI) expandCommand(scope, operation string) (string, string) {
 			switch operation {
 			case "a":
 				expandedOperation = "add"
-			case "m":
-				expandedOperation = "mod"
+			case "u":
+				expandedOperation = "update"
 			case "d":
-				expandedOperation = "del"
+				expandedOperation = "delete"
 			case "s":
 				expandedOperation = "select"
 			case "l":
@@ -246,10 +246,10 @@ func (c *CLI) expandCommand(scope, operation string) (string, string) {
 			switch operation {
 			case "a":
 				expandedOperation = "add"
-			case "m":
-				expandedOperation = "mod"
+			case "u":
+				expandedOperation = "update"
 			case "d":
-				expandedOperation = "del"
+				expandedOperation = "delete"
 			case "p":
 				expandedOperation = "permission"
 			case "i":
@@ -269,21 +269,21 @@ func (c *CLI) expandCommand(scope, operation string) (string, string) {
 			switch operation {
 			case "a":
 				expandedOperation = "add"
+			case "u":
+				expandedOperation = "update"
 			case "m":
-				expandedOperation = "mod"
-			case "v":
 				expandedOperation = "move"
 			case "d":
-				expandedOperation = "del"
+				expandedOperation = "delete"
 			case "f":
 				expandedOperation = "find"
 			case "s":
 				expandedOperation = "sort"
-			case "l":
-				expandedOperation = "link"
-			case "u":
+			case "c":
+				expandedOperation = "connect"
+			case "-":
 				expandedOperation = "undo"
-			case "r":
+			case "+":
 				expandedOperation = "redo"
 			}
 		case "system":
