@@ -1,12 +1,14 @@
+// Package data provides data management functionality for the Mindnoscape application.
+// This file contains the implementation of the history system for undo and redo operations.
 package data
 
 import (
 	"fmt"
-	"strconv"
 
 	"mindnoscape/local-app/internal/models"
 )
 
+// OperationType defines the types of operations that can be performed on nodes.
 type OperationType string
 
 const (
@@ -16,6 +18,7 @@ const (
 	OpUpdate OperationType = "Update"
 )
 
+// Operation represents a single operation performed on a node, used for undo/redo functionality.
 type Operation struct {
 	Type         OperationType
 	AffectedNode models.NodeInfo
@@ -28,12 +31,14 @@ type Operation struct {
 	DeletedTree  []*models.Node    // Used for Delete to store the entire deleted subtree
 }
 
+// HistoryManager manages the history of operations for undo and redo functionality.
 type HistoryManager struct {
 	history      []Operation
 	historyIndex int
 	nm           *NodeManager
 }
 
+// NewHistoryManager creates a new HistoryManager instance.
 func NewHistoryManager(nm *NodeManager) *HistoryManager {
 	return &HistoryManager{
 		history:      []Operation{},
@@ -42,6 +47,7 @@ func NewHistoryManager(nm *NodeManager) *HistoryManager {
 	}
 }
 
+// HistoryAdd adds a new operation to the history.
 func (hm *HistoryManager) HistoryAdd(op Operation) {
 	if hm.historyIndex == len(hm.history)-1 {
 		hm.history = append(hm.history, op)
@@ -51,77 +57,38 @@ func (hm *HistoryManager) HistoryAdd(op Operation) {
 	hm.historyIndex++
 }
 
+// HistoryReset clears the history.
 func (hm *HistoryManager) HistoryReset() {
 	hm.history = []Operation{}
 	hm.historyIndex = -1
 }
 
-func (hm *HistoryManager) Undo() error {
+// GetLastOperation returns the last operation in the history.
+func (hm *HistoryManager) GetLastOperation() (*Operation, error) {
 	if hm.historyIndex < 0 {
-		return fmt.Errorf("nothing to undo")
+		return nil, fmt.Errorf("no operations to undo")
 	}
-
-	op := hm.history[hm.historyIndex]
-
-	var err error
-	switch op.Type {
-	case OpAdd:
-
-		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.ID), true)
-	case OpDelete:
-
-		err = hm.restoreSubtree(op.DeletedTree)
-	case OpMove:
-
-		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.ID), strconv.Itoa(op.OldParentID), true)
-	case OpUpdate:
-		err = hm.nm.NodeUpdate(strconv.Itoa(op.AffectedNode.ID), op.OldContent, op.OldExtra, true)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to undo %s: %w", op.Type, err)
-	}
-
-	hm.historyIndex--
-	return nil
+	return &hm.history[hm.historyIndex], nil
 }
 
-func (hm *HistoryManager) Redo() error {
+// GetNextOperation returns the next operation in the history for redo.
+func (hm *HistoryManager) GetNextOperation() (*Operation, error) {
 	if hm.historyIndex >= len(hm.history)-1 {
-		return fmt.Errorf("nothing to redo")
+		return nil, fmt.Errorf("no operations to redo")
 	}
-
-	op := hm.history[hm.historyIndex+1]
-
-	var err error
-	switch op.Type {
-	case OpAdd:
-
-		err = hm.nm.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true)
-	case OpDelete:
-
-		err = hm.nm.NodeDelete(strconv.Itoa(op.AffectedNode.ID), true)
-	case OpMove:
-
-		err = hm.nm.NodeMove(strconv.Itoa(op.AffectedNode.ID), strconv.Itoa(op.NewParentID), true)
-	case OpUpdate:
-		err = hm.nm.NodeUpdate(strconv.Itoa(op.AffectedNode.ID), op.NewContent, op.NewExtra, true)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to redo %s: %w", op.Type, err)
-	}
-
-	hm.historyIndex++
-	return nil
+	return &hm.history[hm.historyIndex+1], nil
 }
 
-func (hm *HistoryManager) restoreSubtree(nodes []*models.Node) error {
-	for _, node := range nodes {
-		err := hm.nm.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true)
-		if err != nil {
-			return fmt.Errorf("failed to restore node %d: %w", node.Index, err)
-		}
+// RemoveLastOperation removes the last operation from the history.
+func (hm *HistoryManager) RemoveLastOperation() {
+	if hm.historyIndex >= 0 {
+		hm.historyIndex--
 	}
-	return nil
+}
+
+// MoveToNextOperation moves the history index to the next operation.
+func (hm *HistoryManager) MoveToNextOperation() {
+	if hm.historyIndex < len(hm.history)-1 {
+		hm.historyIndex++
+	}
 }

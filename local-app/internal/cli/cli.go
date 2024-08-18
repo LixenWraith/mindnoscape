@@ -1,9 +1,12 @@
+// Package cli provides the command-line interface functionality for Mindnoscape.
+// It handles user input, command execution, and interaction with the data layer.
 package cli
 
 import (
 	"bufio"
 	"fmt"
 	"io"
+	"mindnoscape/local-app/internal/models"
 	"os"
 	"regexp"
 	"strings"
@@ -13,38 +16,34 @@ import (
 	"mindnoscape/local-app/internal/ui"
 )
 
+// CLI represents the command-line interface of the application.
+// It manages user interactions, data operations, and output rendering.
 type CLI struct {
-	Data        *data.Manager
-	Prompt      string
-	CurrentUser string
-	UI          *ui.UI
-	Logger      *log.Logger
+	CurrentUser    *models.UserInfo
+	CurrentMindmap *models.MindmapInfo
+	Data           *data.Manager
+	UI             *ui.UI
+	Logger         *log.Logger
 }
 
+// NewCLI creates and initializes a new CLI instance.
+// It sets up the data manager, logger, and user interface components.
 func NewCLI(dataManager *data.Manager, logger *log.Logger) (*CLI, error) {
 	cli := &CLI{
-		Data:        dataManager,
-		CurrentUser: "",
-		UI:          ui.NewUI(os.Stdout, true),
-		Logger:      logger,
+		Data: dataManager,
+		CurrentUser: &models.UserInfo{
+			Username: "",
+		},
+		CurrentMindmap: &models.MindmapInfo{
+			Name: "",
+		},
+		UI:     ui.NewUI(os.Stdout, true),
+		Logger: logger,
 	}
-	cli.UpdatePrompt()
 	return cli, nil
 }
 
-func (c *CLI) UpdatePrompt() {
-	mindmapName := ""
-	if c.Data.MindmapManager.CurrentMindmap != nil {
-		mindmapName = c.Data.MindmapManager.CurrentMindmap.Name
-	}
-	c.CurrentUser = c.Data.UserManager.UserGet()
-	c.Prompt = c.UI.GetPromptString(c.CurrentUser, mindmapName)
-}
-
-func (c *CLI) PrintPrompt() {
-	c.UI.Print(c.Prompt)
-}
-
+// promptForInput asks the user for input with the given prompt and returns the trimmed response.
 func (c *CLI) promptForInput(prompt string) (string, error) {
 	input, err := c.UI.ReadLine(prompt)
 	if err != nil {
@@ -53,13 +52,14 @@ func (c *CLI) promptForInput(prompt string) (string, error) {
 	return strings.TrimSpace(input), nil
 }
 
+// promptForPassword securely asks the user for a password and returns it.
 func (c *CLI) promptForPassword(prompt string) (string, error) {
 	return c.UI.ReadPassword(prompt)
 }
 
+// ExecuteScript runs a series of commands from a script file.
 func (c *CLI) ExecuteScript(filename string) error {
-	c.UpdatePrompt()
-
+	// Open the script file
 	f, err := os.Open(filename)
 	if err != nil {
 		return fmt.Errorf("failed to open script file: %v", err)
@@ -71,14 +71,23 @@ func (c *CLI) ExecuteScript(filename string) error {
 		}
 	}()
 
+	// Create a scanner to read the file line by line
 	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		c.PrintPrompt()
-		command := scanner.Text()
-		c.UI.Println(command)
 
-		strippedPrompt := stripColorCodes(c.Prompt)
-		logEntry := fmt.Sprintf("%s [%s] %s", strippedPrompt, filename, command)
+	// Iterate through each line in the script
+	for scanner.Scan() {
+		var username, mindmapName string
+		if c.CurrentUser != nil {
+			username = c.CurrentUser.Username
+		}
+		if c.CurrentMindmap != nil {
+			mindmapName = c.CurrentMindmap.Name
+		}
+		c.UI.Prompt(username, mindmapName)
+		command := scanner.Text()
+		c.UI.Message(command)
+
+		logEntry := fmt.Sprintf("%s [%s] %s", filename, command)
 		if err := c.Logger.LogCommand(logEntry); err != nil {
 			c.UI.Warning(fmt.Sprintf("Failed to log command: %v", err))
 		}
@@ -91,7 +100,6 @@ func (c *CLI) ExecuteScript(filename string) error {
 			}
 			c.UI.Error(err.Error())
 		}
-		c.UpdatePrompt()
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -102,8 +110,20 @@ func (c *CLI) ExecuteScript(filename string) error {
 
 }
 
+// RunInteractive handles a single iteration of the interactive command-line loop.
+// It reads user input, processes the command, and updates the application state.
 func (c *CLI) RunInteractive() error {
-	line, err := c.UI.ReadLine(c.Prompt)
+	// Prepare prompt parts
+	var username, mindmapName string // Setting empty strings for nil current user and current mindmap variables
+	if c.CurrentUser != nil {
+		username = c.CurrentUser.Username
+	}
+	if c.CurrentMindmap != nil {
+		mindmapName = c.CurrentMindmap.Name
+	}
+
+	// Read user input
+	line, err := c.UI.ReadLine(c.UI.GetPromptString(username, mindmapName))
 	if err != nil {
 		if err == io.EOF || err == ui.ErrInterrupted {
 			return io.EOF
@@ -116,16 +136,17 @@ func (c *CLI) RunInteractive() error {
 		return nil
 	}
 
-	// Strip color codes from prompt for logging
-	strippedPrompt := stripColorCodes(c.Prompt)
-	logEntry := fmt.Sprintf("%s%s", strippedPrompt, line)
-
+	// Log command
+	logEntry := fmt.Sprintf("%s", line)
 	err = c.Logger.LogCommand(logEntry)
 	if err != nil {
 		c.UI.Warning(fmt.Sprintf("Failed to log command: %v", err))
 	}
 
+	// Parse the input into arguments
 	args := c.ParseArgs(line)
+
+	// Execute the command
 	err = c.ExecuteCommand(args)
 	if err != nil {
 		// Strip color codes from error message before logging
@@ -136,13 +157,14 @@ func (c *CLI) RunInteractive() error {
 		if err == io.EOF {
 			return err
 		}
+		c.UI.Error(err.Error())
 	}
 
-	c.UpdatePrompt()
-
-	return err
+	return nil
 }
 
+// ParseArgs splits an input string into a slice of argument strings,
+// handling quoted arguments as single units.
 func (c *CLI) ParseArgs(input string) []string {
 	var args []string
 	var currentArg strings.Builder
@@ -173,17 +195,19 @@ func (c *CLI) ParseArgs(input string) []string {
 	return args
 }
 
+// ExecuteCommand routes the parsed command to the appropriate handler based on the command scope.
 func (c *CLI) ExecuteCommand(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command provided")
 	}
 
-	// Expand concise command to full command
+	// Expand short command to full command
 	if len(args) >= 2 {
 		args[0], args[1] = c.expandCommand(args[0], args[1])
 	}
 
 	var err error
+	// Route the command to the appropriate handler
 	switch args[0] {
 	case "user":
 
@@ -207,7 +231,7 @@ func (c *CLI) ExecuteCommand(args []string) error {
 	return err
 }
 
-// expandCommand converts concise (one letter) commands and operations to the long (complete string) format
+// expandCommand converts concise (one letter) commands and operations to the long (complete string) format.
 func (c *CLI) expandCommand(scope, operation string) (string, string) {
 	expandedScope := scope
 	expandedOperation := operation

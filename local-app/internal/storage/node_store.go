@@ -1,32 +1,38 @@
+// Package storage provides functionality for persisting and retrieving Mindnoscape data.
+// This file implements the storage operations for nodes using SQLite.
 package storage
 
 import (
-	"fmt"
-	"mindnoscape/local-app/internal/models"
-
 	"database/sql"
+	"fmt"
+
+	"mindnoscape/local-app/internal/models"
 )
 
+// NodeStore defines the interface for node-related storage operations.
 type NodeStore interface {
-	NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string) (int, error)
+	NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string, id ...int) (int, error)
 	NodeDelete(mindmapName string, username string, id int) error
 	NodeGet(mindmapName string, username string, id int) ([]*models.Node, error)
-	NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error)
 	NodeGetAll(mindmapName string, username string) ([]*models.Node, error)
 	NodeUpdate(mindmapName string, username string, id int, content string, extra map[string]string, index string) error
 	NodeMove(mindmapName string, username string, sourceID, targetID int) error
 	NodeOrderUpdate(mindmapName string, username string, nodeID int, index string) error
 }
 
+// SQLiteNodeStorage implements the NodeStore interface using SQLite.
 type SQLiteNodeStorage struct {
 	db *sql.DB
 }
 
+// NewSQLiteNodeStorage creates a new SQLiteNodeStorage instance.
 func NewSQLiteNodeStorage(db *sql.DB) *SQLiteNodeStorage {
 	return &SQLiteNodeStorage{db: db}
 }
 
-func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string) (int, error) {
+// NodeAdd adds a new node to the database.
+func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string, id ...int) (int, error) {
+	// Start a transaction
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return -1, err
@@ -42,7 +48,11 @@ func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parent
 
 	// Insert the node
 	var nodeID int64
-	if parentID == -1 {
+	if len(id) > 0 && id[0] != 0 {
+		// Use the provided ID
+		_, err = tx.Exec("INSERT INTO nodes (id, mindmap_id, parent_id, content, node_index) VALUES (?, ?, ?, ?, ?)", id[0], mindmapID, parentID, content, index)
+		nodeID = int64(id[0])
+	} else if parentID == -1 {
 		// This is the root node, explicitly set its ID to 0 and parentID to -1
 		_, err = tx.Exec("INSERT INTO nodes (id, mindmap_id, parent_id, content, node_index) VALUES (0, ?, -1, ?, ?)", mindmapID, content, index)
 		nodeID = 0
@@ -77,7 +87,9 @@ func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parent
 	return int(nodeID), nil
 }
 
+// NodeDelete removes a node from the database.
 func (ns *SQLiteNodeStorage) NodeDelete(mindmapName string, username string, id int) error {
+	// Start a transaction
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -106,9 +118,11 @@ func (ns *SQLiteNodeStorage) NodeDelete(mindmapName string, username string, id 
 		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
+	// Commit the transaction
 	return tx.Commit()
 }
 
+// NodeGet retrieves a specific node from the database.
 func (ns *SQLiteNodeStorage) NodeGet(mindmapName string, username string, id int) ([]*models.Node, error) {
 	// Check permissions
 	var mindmapID int
@@ -131,6 +145,7 @@ func (ns *SQLiteNodeStorage) NodeGet(mindmapName string, username string, id int
 	}
 	defer rows.Close()
 
+	// Scan attributes into the node's Extra map
 	node.Extra = make(map[string]string)
 	for rows.Next() {
 		var key, value string
@@ -143,23 +158,7 @@ func (ns *SQLiteNodeStorage) NodeGet(mindmapName string, username string, id int
 	return []*models.Node{&node}, nil
 }
 
-func (ns *SQLiteNodeStorage) NodeGetParent(mindmapName string, username string, id int) ([]*models.Node, error) {
-	// First, get the parent ID
-	var parentID int
-	err := ns.db.QueryRow(`
-        SELECT COALESCE(n.parent_id, -1)
-        FROM nodes n
-        JOIN mindmaps m ON n.mindmap_id = m.id
-        WHERE n.id = ? AND m.name = ? AND (m.owner = ? OR m.is_public = 1)
-    `, id, mindmapName, username).Scan(&parentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get parent ID: %w", err)
-	}
-
-	// Now get the parent node
-	return ns.NodeGet(mindmapName, username, parentID)
-}
-
+// NodeGetAll retrieves all nodes for a given mindmap.
 func (ns *SQLiteNodeStorage) NodeGetAll(mindmapName string, username string) ([]*models.Node, error) {
 	// Check permissions and get mindmap ID
 	var mindmapID int
@@ -175,6 +174,7 @@ func (ns *SQLiteNodeStorage) NodeGetAll(mindmapName string, username string) ([]
 	}
 	defer rows.Close()
 
+	// Scan nodes into a slice
 	var nodes []*models.Node
 	for rows.Next() {
 		var node models.Node
@@ -205,7 +205,9 @@ func (ns *SQLiteNodeStorage) NodeGetAll(mindmapName string, username string) ([]
 	return nodes, nil
 }
 
+// NodeUpdate updates an existing node in the database.
 func (ns *SQLiteNodeStorage) NodeUpdate(mindmapName string, username string, id int, content string, extra map[string]string, index string) error {
+	// Start a transaction
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -242,10 +244,13 @@ func (ns *SQLiteNodeStorage) NodeUpdate(mindmapName string, username string, id 
 		}
 	}
 
+	// Commit the transaction
 	return tx.Commit()
 }
 
+// NodeMove changes the parent of a node in the database.
 func (ns *SQLiteNodeStorage) NodeMove(mindmapName string, username string, sourceID, targetID int) error {
+	// Start a transaction
 	tx, err := ns.db.Begin()
 	if err != nil {
 		return err
@@ -271,7 +276,6 @@ func (ns *SQLiteNodeStorage) NodeMove(mindmapName string, username string, sourc
 	if sourceCount == 0 {
 		return fmt.Errorf("source node not found")
 	}
-
 	err = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE id = ? AND mindmap_id = (SELECT id FROM mindmaps WHERE name = ?)", targetID, mindmapName).Scan(&targetCount)
 	if err != nil {
 		return fmt.Errorf("failed to check target node: %w", err)
@@ -286,24 +290,38 @@ func (ns *SQLiteNodeStorage) NodeMove(mindmapName string, username string, sourc
 		return fmt.Errorf("failed to update node parent: %w", err)
 	}
 
+	// Commit the transaction
 	return tx.Commit()
 }
 
-func (ns *SQLiteNodeStorage) NodeOrderUpdate(mindmapName string, username string, id int, index string) error {
+// NodeOrderUpdate updates the index of a specific node in the database.
+func (ns *SQLiteNodeStorage) NodeOrderUpdate(mindmapName string, username string, nodeID int, index string) error {
+	// Start a transaction
+	tx, err := ns.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	// Check permissions
 	var count int
-	err := ns.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)
+	err = tx.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE name = ? AND (owner = ? OR is_public = 1)", mindmapName, username).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("failed to check permissions: %w", err)
 	}
 	if count == 0 {
-		return fmt.Errorf("no permission to update node order in data '%s'", mindmapName)
+		return fmt.Errorf("no permission to update node order in mindmap '%s'", mindmapName)
 	}
 
 	// Update node index
-	_, err = ns.db.Exec("UPDATE nodes SET node_index = ? WHERE id = ?", index, id)
+	_, err = tx.Exec("UPDATE nodes SET node_index = ? WHERE id = ?", index, nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to update node order: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil

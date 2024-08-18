@@ -1,3 +1,5 @@
+// Package storage provides functionality for persisting and retrieving Mindnoscape data.
+// This file implements the SQLite storage backend.
 package storage
 
 import (
@@ -9,6 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// SQLiteStore represents the SQLite storage implementation.
 type SQLiteStore struct {
 	db           *sql.DB
 	UserStore    UserStore
@@ -16,21 +19,26 @@ type SQLiteStore struct {
 	NodeStore    NodeStore
 }
 
+// NewSQLiteStore creates a new SQLiteStore instance and initializes the database.
 func NewSQLiteStore(dbDir, dbFile string) (*SQLiteStore, error) {
+	// Ensure the database directory exists
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
+	// Open the SQLite database or create and open it
 	dbPath := filepath.Join(dbDir, dbFile)
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Create the store instance
 	store := &SQLiteStore{
 		db: db,
 	}
 
+	// Initialize the database schema
 	if err := store.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
@@ -43,11 +51,14 @@ func NewSQLiteStore(dbDir, dbFile string) (*SQLiteStore, error) {
 	return store, nil
 }
 
+// Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+// initSchema initializes the database schema.
 func (s *SQLiteStore) initSchema() error {
+	// Create tables if they don't exist
 	_, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			username TEXT PRIMARY KEY,

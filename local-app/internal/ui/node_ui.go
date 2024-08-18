@@ -1,3 +1,5 @@
+// Package ui provides user interface functionality for the Mindnoscape application.
+// This file contains the NodeUI struct and methods for displaying node-related information.
 package ui
 
 import (
@@ -8,10 +10,12 @@ import (
 	"mindnoscape/local-app/internal/models"
 )
 
+// NodeUI handles the visualization of node-related information.
 type NodeUI struct {
 	visualizer *Visualizer
 }
 
+// NewNodeUI creates a new NodeUI instance.
 func NewNodeUI(w io.Writer, useColor bool) *NodeUI {
 	return &NodeUI{
 		visualizer: NewVisualizer(w, useColor),
@@ -44,12 +48,19 @@ func (nui *NodeUI) NodeFind(matches []*models.Node, showIndex bool) {
 	}
 }
 
+// displayNodeLine displays a single line of node information.
 func (nui *NodeUI) displayNodeLine(node *models.Node, showID bool) {
-	line := fmt.Sprintf("{{yellow}}%s{{default}} %s", node.Index, node.Content)
-	if showID {
-		line += fmt.Sprintf(" {{orange}}[%d]{{default}}", node.ID)
-	}
+	// Construct the base line with node id (if required), index, and content
+	line := fmt.Sprintf("{{yellow}}%s{{default}} %s %s", node.Index, func(show bool) string {
+		idPart := fmt.Sprintf("{{orange}}[%d]{{default}}", node.ID)
+		if show == true {
+			return idPart
+		} else {
+			return ""
+		}
+	}(showID), node.Content)
 
+	// Add extra fields if any
 	if len(node.Extra) > 0 {
 		var extraFields []string
 		for k, v := range node.Extra {
@@ -58,9 +69,11 @@ func (nui *NodeUI) displayNodeLine(node *models.Node, showID bool) {
 		line += " " + strings.Join(extraFields, ", ")
 	}
 
+	// Display the constructed line
 	nui.visualizer.PrintMultiColoredLine(line, nui.getColorMap())
 }
 
+// getColorMap returns a map of color codes used in node visualization.
 func (nui *NodeUI) getColorMap() map[string]Color {
 	return map[string]Color{
 		"{{yellow}}":  ColorYellow,

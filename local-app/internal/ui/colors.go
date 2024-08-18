@@ -1,7 +1,11 @@
+// Package ui provides user interface functionality for the Mindnoscape application.
+// This file defines color constants for terminal output.
 package ui
 
+// Color represents an ANSI color code.
 type Color string
 
+// Color constants for various terminal colors.
 const (
 	ColorDefault     Color = "\033[0m"
 	ColorBlack       Color = "\033[38;2;0;0;0m"

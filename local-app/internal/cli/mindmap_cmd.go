@@ -1,41 +1,46 @@
+// Package cli provides the command-line interface functionality for Mindnoscape.
+// This file contains handlers for mindmap-related commands.
 package cli
 
 import (
 	"fmt"
 )
 
+// MindmapInfo displays information about the currently selected mindmap.
 func (c *CLI) MindmapInfo(args []string) error {
-	if c.Data.MindmapManager.CurrentMindmap == nil {
-		c.UI.Info("No mindmap is currently selected.")
+	if c.Data.MindmapManager.MindmapGet() == nil {
+		c.UI.Info("No mindmap selected.")
 		return nil
 	}
-	c.UI.Printf("Current mindmap: %s\n", c.Data.MindmapManager.CurrentMindmap.Name)
+	c.UI.Info(fmt.Sprintf("Current mindmap: %s", c.Data.MindmapManager.MindmapGet().Name))
 	return nil
 }
 
-// MindmapAdd handles the 'mindmap add' command
+// MindmapAdd handles the 'mindmap add' command, creating a new mindmap.
 func (c *CLI) MindmapAdd(args []string) error {
+	// Check for correct usage
 	if len(args) != 1 {
 		return fmt.Errorf("usage: mindmap add <mindmap name>")
 	}
 
+	// Create the new mindmap
 	name := args[0]
 	var err = c.Data.MindmapManager.MindmapAdd(name, false) // Default to private mindmaps
 	if err != nil {
 		return err
 	}
 
-	c.UI.Success(fmt.Sprintf("New mindmap '%s' created", name))
+	c.UI.Success(fmt.Sprintf("New mindmap '%s' created.", name))
 	return nil
 }
 
-// MindmapUpdate handles the 'mindmap update' command (placeholder)
+// MindmapUpdate handles the 'mindmap update' command (placeholder for future implementation).
 func (c *CLI) MindmapUpdate(args []string) error {
 	c.UI.Info("Mindmap update functionality is not implemented yet.")
 	return nil
 }
 
-// MindmapDelete handles the 'mindmap del' command
+// MindmapDelete handles the 'mindmap delete' command, deleting an existing mindmap.
 func (c *CLI) MindmapDelete(args []string) error {
 	if len(args) == 0 {
 		// Clear all mindmaps owned by the current user
@@ -44,18 +49,16 @@ func (c *CLI) MindmapDelete(args []string) error {
 			return fmt.Errorf("failed to get mindmaps: %v", err)
 		}
 
-		clearedCount := 0
+		var clearedCount = 0
 		for _, mm := range mindmaps {
-			if mm.Owner == c.CurrentUser {
-				err := c.Data.MindmapManager.MindmapDelete(mm.Name)
-				if err != nil {
-					return fmt.Errorf("failed to delete mindmap '%s': %v", mm.Name, err)
-				}
-				clearedCount++
+			err := c.Data.MindmapManager.MindmapDelete(mm.Name)
+			if err != nil {
+				return fmt.Errorf("failed to delete mindmap '%s': %v", mm.Name, err)
 			}
+			clearedCount++
 		}
 
-		c.UI.Success(fmt.Sprintf("%d mind map(s) deleted", clearedCount))
+		c.UI.Success(fmt.Sprintf("%d mind map(s) deleted.", clearedCount))
 	} else {
 		// Delete a specific mindmap
 		mindmapName := args[0]
@@ -64,31 +67,38 @@ func (c *CLI) MindmapDelete(args []string) error {
 			return fmt.Errorf("failed to delete mindmap '%s': %v", mindmapName, err)
 		}
 
-		c.UI.Success(fmt.Sprintf("Mind map '%s' deleted", mindmapName))
+		// If the deleted mindmap was the current one, update CLI's CurrentMindmap
+		if c.CurrentMindmap != nil && c.CurrentMindmap.Name == mindmapName {
+			c.CurrentMindmap = nil
+		}
+
+		c.UI.Success(fmt.Sprintf("Mind map '%s' deleted.", mindmapName))
 	}
 
 	return nil
 }
 
-// MindmapPermission handles the 'mindmap permission' command
+// MindmapPermission handles the 'mindmap permission' command, changing a mindmap's visibility.
 func (c *CLI) MindmapPermission(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 || len(args) > 2 {
 		return fmt.Errorf("usage: mindmap permission <mindmap name> [public|private]")
 	}
 
 	mindmapName := args[0]
 
-	// Check permission
+	// Check permission if only mindmap name is provided
 	if len(args) == 1 {
 		hasPermission, err := c.Data.MindmapManager.MindmapPermission(mindmapName, nil)
 		if err != nil {
 			return fmt.Errorf("failed to check mindmap permission: %v", err)
 		}
 
+		// Set permission if both mindmap name and permission are provided
 		if hasPermission {
-			c.UI.Info(fmt.Sprintf("You have permission to access mindmap '%s'", mindmapName))
+			c.UI.Message(fmt.Sprintf("You have permission to access mindmap '%s'", mindmapName))
 		} else {
-			c.UI.Info(fmt.Sprintf("You don't have permission to access mindmap '%s'", mindmapName))
+			c.UI.Message(fmt.Sprintf("You don't have permission to access mindmap '%s'", mindmapName))
 		}
 		return nil
 	}
@@ -118,39 +128,48 @@ func (c *CLI) MindmapPermission(args []string) error {
 	return err
 }
 
-// MindmapImport handles the 'mindmap import' command
+// MindmapImport handles the 'mindmap import' command, importing a mindmap from a file.
 func (c *CLI) MindmapImport(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 || len(args) > 2 {
 		return fmt.Errorf("usage: mindmap import <filename> [json|xml]")
 	}
 
+	// Get filename and format
 	filename := args[0]
 	format := "json"
 	if len(args) == 2 {
 		format = args[1]
 	}
 
-	err := c.Data.MindmapManager.MindmapImport(filename, format)
+	// Import the mindmap
+	updatedMindmap, err := c.Data.MindmapManager.MindmapImport(filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to load mindmap: %v", err)
 	}
+
+	// Update the CLI's current mindmap state
+	c.CurrentMindmap = updatedMindmap
 
 	c.UI.Success(fmt.Sprintf("Mind map loaded from %s", filename))
 	return nil
 }
 
-// MindmapExport handles the 'mindmap export' command
+// MindmapExport handles the 'mindmap export' command, exporting a mindmap to a file.
 func (c *CLI) MindmapExport(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 || len(args) > 2 {
 		return fmt.Errorf("usage: mindmap export <filename> [json|xml]")
 	}
 
+	// Get filename and format
 	filename := args[0]
 	format := "json"
 	if len(args) == 2 {
 		format = args[1]
 	}
 
+	// Export the mindmap
 	err := c.Data.MindmapManager.MindmapExport(filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to save mindmap: %v", err)
@@ -160,41 +179,48 @@ func (c *CLI) MindmapExport(args []string) error {
 	return nil
 }
 
-// MindmapSelect handles the 'mindmap select' command
+// MindmapSelect handles the 'mindmap select' command, selecting a mindmap as current mindmap.
 func (c *CLI) MindmapSelect(args []string) error {
+	// If no arguments, deselect current mindmap
 	if len(args) == 0 {
 		err := c.Data.MindmapManager.MindmapSelect("")
 		if err != nil {
 			return err
 		}
-		c.UI.Success("Deselected the current mindmap")
+		c.CurrentMindmap = nil // Ensure this is set to nil
+		c.UI.Success("Deselected the current mindmap.")
 		return nil
 	}
 
+	// Select the specified mindmap
 	name := args[0]
 	err := c.Data.MindmapManager.MindmapSelect(name)
 	if err != nil {
 		return err
 	}
 
-	c.UI.Success(fmt.Sprintf("Switched to mindmap '%s'", name))
+	c.CurrentMindmap = c.Data.MindmapManager.MindmapGet()
+	c.UI.Success(fmt.Sprintf("Selected mindmap '%s'", name))
 	return nil
 }
 
-// MindmapList handles the 'mindmap list' command
+// MindmapList handles the 'mindmap list' command, displaying all available mindmaps accessible to the current user.
 func (c *CLI) MindmapList(args []string) error {
+	// Get the list of mindmaps
 	mindmaps, err := c.Data.MindmapManager.MindmapList()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve mindmaps: %v", err)
 	}
 
-	c.UI.MindmapUI.MindmapList(mindmaps, c.CurrentUser)
+	// Display the list of mindmaps
+	c.UI.MindmapUI.MindmapList(mindmaps, c.CurrentUser.Username)
 
 	return nil
 }
 
-// MindmapView handles the 'mindmap view' command
+// MindmapView handles the 'mindmap view' command, displaying the structure of a mindmap.
 func (c *CLI) MindmapView(args []string) error {
+	// Check if ID should be shown
 	showIndex := false
 
 	for _, arg := range args {
@@ -204,7 +230,7 @@ func (c *CLI) MindmapView(args []string) error {
 	}
 
 	// Get the current mindmap
-	mindmap := c.Data.MindmapManager.CurrentMindmap
+	mindmap := c.Data.MindmapManager.MindmapGet()
 	if mindmap == nil {
 		return fmt.Errorf("no mindmap selected")
 	}
@@ -215,28 +241,26 @@ func (c *CLI) MindmapView(args []string) error {
 		return fmt.Errorf("failed to get mindmap nodes: %v", err)
 	}
 
-	if len(nodes) == 0 {
-		return fmt.Errorf("no nodes found for the current mindmap")
-	}
-
 	// Use the MindmapUI to visualize the mindmap
 	c.UI.MindmapUI.MindmapView(nodes, showIndex)
 
 	return nil
 }
 
-// MindmapConnect handles the 'mindmap connect' command (placeholder)
+// MindmapConnect handles the 'mindmap connect' command (placeholder for future implementation).
 func (c *CLI) MindmapConnect(args []string) error {
 	c.UI.Info("Mindmap connection functionality is not implemented yet.")
 	return nil
 }
 
-// ExecuteMindmapCommand routes the mindmap command to the appropriate handler
+// ExecuteMindmapCommand routes the mindmap command to the appropriate handler.
 func (c *CLI) ExecuteMindmapCommand(args []string) error {
+	// If no arguments, show mindmap info
 	if len(args) == 0 {
 		return c.MindmapInfo(args)
 	}
 
+	// Route to specific mindmap command handlers
 	operation := args[0]
 	switch operation {
 	case "add":

@@ -1,3 +1,5 @@
+// Package ui provides user interface functionality for the Mindnoscape application.
+// This file contains the Visualizer struct and methods for handling colored output.
 package ui
 
 import (
@@ -6,11 +8,13 @@ import (
 	"strings"
 )
 
+// Visualizer handles the low-level output formatting and coloring.
 type Visualizer struct {
 	writer   io.Writer
 	useColor bool
 }
 
+// NewVisualizer creates a new Visualizer instance.
 func NewVisualizer(w io.Writer, useColor bool) *Visualizer {
 	return &Visualizer{
 		writer:   w,
@@ -18,18 +22,22 @@ func NewVisualizer(w io.Writer, useColor bool) *Visualizer {
 	}
 }
 
+// Print writes a message to the Visualizer's writer.
 func (v *Visualizer) Print(message string) {
 	fmt.Fprint(v.writer, message)
 }
 
+// Printf writes a formatted message to the Visualizer's writer.
 func (v *Visualizer) Printf(format string, args ...interface{}) {
 	fmt.Fprintf(v.writer, format, args...)
 }
 
+// Println writes a message followed by a newline to the Visualizer's writer.
 func (v *Visualizer) Println(message string) {
 	fmt.Fprintln(v.writer, message)
 }
 
+// PrintColored writes a colored message to the Visualizer's writer if color is enabled.
 func (v *Visualizer) PrintColored(message string, color Color) {
 	if v.useColor {
 		fmt.Fprintf(v.writer, "%s%s%s", color, message, ColorDefault)
@@ -38,8 +46,11 @@ func (v *Visualizer) PrintColored(message string, color Color) {
 	}
 }
 
+// PrintMultiColoredLine prints a line with multiple color codes.
 func (v *Visualizer) PrintMultiColoredLine(line string, colorMap map[string]Color) {
+	// Process the line in parts, handling color codes
 	for len(line) > 0 {
+		// Find the next color code
 		startIndex := strings.Index(line, "{{")
 		if startIndex == -1 {
 			v.Print(line)
@@ -57,6 +68,7 @@ func (v *Visualizer) PrintMultiColoredLine(line string, colorMap map[string]Colo
 			v.Print(line[:startIndex])
 		}
 
+		// Extract and apply the color code
 		colorCode := line[startIndex : endIndex+2]
 		color, exists := colorMap[colorCode]
 		if !exists {

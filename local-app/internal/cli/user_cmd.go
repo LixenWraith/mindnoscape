@@ -1,3 +1,5 @@
+// Package cli provides the command-line interface functionality for Mindnoscape.
+// This file contains handlers for user-related commands.
 package cli
 
 import (
@@ -5,22 +7,25 @@ import (
 	// "mindnoscape/local-app/internal/ui"
 )
 
+// UserInfo displays information about the currently selected user.
 func (c *CLI) UserInfo(args []string) error {
 	currentUser := c.Data.UserManager.UserGet()
-	if currentUser == "" {
+	if currentUser.Username == "" {
 		c.UI.Info("No user is currently selected.")
 	} else {
-		c.UI.Printf("Current user: %s\n", currentUser)
+		c.UI.Message("Current user: %s\n", currentUser)
 	}
 	return nil
 }
 
-// UserAdd handles the 'user add' command
+// UserAdd handles the 'user add' command, creating a new user account.
 func (c *CLI) UserAdd(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 {
 		return fmt.Errorf("usage: user add <username> [password]")
 	}
 
+	// Get username and password
 	username := args[0]
 	var password string
 	var err error
@@ -34,21 +39,24 @@ func (c *CLI) UserAdd(args []string) error {
 		}
 	}
 
+	// Create the new user
 	err = c.Data.UserManager.UserAdd(username, password)
 	if err != nil {
 		return err
 	}
 
-	c.UI.Success(fmt.Sprintf("User '%s' created successfully", username))
+	c.UI.Success(fmt.Sprintf("User '%s' created successfully.", username))
 	return nil
 }
 
-// UserUpdate handles the 'user mod' command
+// UserUpdate handles the 'user mod' command, modifying an existing user account.
 func (c *CLI) UserUpdate(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 {
-		return fmt.Errorf("usage: user mod <username> [new_username] [new_password]")
+		return fmt.Errorf("usage: user update <username> [new_username] [new_password]")
 	}
 
+	// Get username and new details
 	username := args[0]
 	var newUsername, newPassword string
 	var err error
@@ -71,27 +79,31 @@ func (c *CLI) UserUpdate(args []string) error {
 		}
 	}
 
+	// Update the user
 	err = c.Data.UserManager.UserUpdate(username, newUsername, newPassword)
 	if err != nil {
 		return err
 	}
 
-	c.UI.Success("User updated successfully")
+	c.UI.Success("User updated successfully.")
 	return nil
 }
 
-// UserDelete handles the 'user del' command
+// UserDelete handles the 'user del' command, deleting an existing user account.
 func (c *CLI) UserDelete(args []string) error {
+	// Check for correct usage
 	if len(args) < 1 {
-		return fmt.Errorf("usage: user del <username>")
+		return fmt.Errorf("usage: user delete <username>")
 	}
 
+	// Get username and confirm with password
 	username := args[0]
 	password, err := c.promptForPassword("Enter password to confirm deletion: ")
 	if err != nil {
 		return err
 	}
 
+	// Authenticate and delete the user
 	authenticated, err := c.Data.UserManager.UserAuthenticate(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
@@ -105,27 +117,31 @@ func (c *CLI) UserDelete(args []string) error {
 		return err
 	}
 
-	c.UI.Success(fmt.Sprintf("User '%s' deleted successfully", username))
+	c.UI.Success(fmt.Sprintf("User '%s' deleted successfully.", username))
 	return nil
 }
 
-// UserSelect handles the 'user select' command
+// UserSelect handles the 'user select' command, selecting a user as current user with authentication.
 func (c *CLI) UserSelect(args []string) error {
+	// If no arguments, deselect current user
 	if len(args) == 0 {
 		err := c.Data.UserManager.UserSelect("")
 		if err != nil {
 			return err
 		}
-		c.UI.Success("Deselected the current user")
+		c.CurrentUser = nil
+		c.UI.Success("Deselected the current user.")
 		return nil
 	}
 
+	// Get username and password
 	username := args[0]
 	password, err := c.promptForPassword(fmt.Sprintf("Enter password for %s (press Enter for empty password): ", username))
 	if err != nil {
 		return err
 	}
 
+	// Authenticate and select the user
 	authenticated, err := c.Data.UserManager.UserAuthenticate(username, password)
 	if err != nil {
 		return fmt.Errorf("authentication error: %v", err)
@@ -139,23 +155,26 @@ func (c *CLI) UserSelect(args []string) error {
 		return fmt.Errorf("failed to switch user: %v", err)
 	}
 
-	c.UI.Success(fmt.Sprintf("Switched to user: %s", username))
-	c.UpdatePrompt()
+	c.CurrentUser = c.Data.UserManager.UserGet()
+
+	c.UI.Success(fmt.Sprintf("Selected user: %s", username))
 	return nil
 }
 
-// UserList handles the 'user list' command (placeholder)
+// UserList handles the 'user list' command (placeholder for future implementation).
 func (c *CLI) UserList(args []string) error {
 	c.UI.Info("User list functionality is not implemented yet.")
 	return nil
 }
 
-// ExecuteUserCommand routes the user command to the appropriate handler
+// ExecuteUserCommand routes the user command to the appropriate handler.
 func (c *CLI) ExecuteUserCommand(args []string) error {
+	// If no arguments, show user info
 	if len(args) == 0 {
 		return c.UserInfo(args)
 	}
 
+	// Route to specific user command handlers
 	operation := args[0]
 	switch operation {
 	case "add":

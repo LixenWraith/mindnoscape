@@ -1,7 +1,10 @@
+// Package data provides data management functionality for the Mindnoscape application.
+// This file contains operations related to user management.
 package data
 
 import (
 	"fmt"
+	"mindnoscape/local-app/internal/models"
 
 	"mindnoscape/local-app/internal/config"
 	"mindnoscape/local-app/internal/storage"
@@ -15,36 +18,43 @@ type UserOperations interface {
 	UserAuthenticate(username, password string) (bool, error)
 	UserSelect(username string) error
 	UserReset()
-	UserGet() string
+	UserGet() *models.UserInfo
 	UserExists(username string) (bool, error)
 }
 
+// UserManager handles all user-related operations and maintains the current user state.
 type UserManager struct {
-	store          storage.UserStore
-	currentUser    string
+	userStore      storage.UserStore
+	currentUser    *models.UserInfo
 	config         *config.Config
 	mindmapManager *MindmapManager
 }
 
-func NewUserManager(store storage.UserStore, cfg *config.Config, mindmapManager *MindmapManager) (*UserManager, error) {
-	if store == nil {
+// NewUserManager creates a new UserManager instance.
+func NewUserManager(userStore storage.UserStore, cfg *config.Config, mindmapManager *MindmapManager) (*UserManager, error) {
+	if userStore == nil {
 		return nil, fmt.Errorf("failed to initialize user storage")
 	}
 
 	return &UserManager{
-		store:          store,
-		currentUser:    "",
+		userStore: userStore,
+		currentUser: &models.UserInfo{
+			Username: "",
+		},
 		config:         cfg,
 		mindmapManager: mindmapManager,
 	}, nil
 }
 
+// UserExists checks if a user with the given username exists.
 func (um *UserManager) UserExists(username string) (bool, error) {
-	return um.store.UserExists(username)
+	return um.userStore.UserExists(username)
 }
 
+// UserAdd creates a new user with the given username and password.
 func (um *UserManager) UserAdd(username, password string) error {
-	exists, err := um.store.UserExists(username)
+	// Check if the user already exists
+	exists, err := um.userStore.UserExists(username)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
 	}
@@ -52,7 +62,8 @@ func (um *UserManager) UserAdd(username, password string) error {
 		return fmt.Errorf("user '%s' already exists", username)
 	}
 
-	err = um.store.UserAdd(username, password)
+	// Add the new user
+	err = um.userStore.UserAdd(username, password)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
@@ -60,9 +71,10 @@ func (um *UserManager) UserAdd(username, password string) error {
 	return nil
 }
 
+// UserDelete removes a user and all associated data.
 func (um *UserManager) UserDelete(username string) error {
 	// Check if the user exists
-	exists, err := um.store.UserExists(username)
+	exists, err := um.userStore.UserExists(username)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
 	}
@@ -71,22 +83,24 @@ func (um *UserManager) UserDelete(username string) error {
 	}
 
 	// Delete user
-	err = um.store.UserDelete(username)
+	err = um.userStore.UserDelete(username)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
 
 	// If the deleted user was the current user, switch to guest
-	if um.currentUser == username {
-		um.currentUser = ""
+	if um.currentUser.Username == username {
+		um.currentUser = &models.UserInfo{
+			Username: ""}
 	}
 
 	return nil
 }
 
+// UserUpdate updates an existing user's username or password.
 func (um *UserManager) UserUpdate(oldUsername, newUsername, newPassword string) error {
 	// Check if the old username exists
-	exists, err := um.store.UserExists(oldUsername)
+	exists, err := um.userStore.UserExists(oldUsername)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
 	}
@@ -96,7 +110,7 @@ func (um *UserManager) UserUpdate(oldUsername, newUsername, newPassword string) 
 
 	// If newUsername is provided, check if it already exists
 	if newUsername != "" && newUsername != oldUsername {
-		exists, err = um.store.UserExists(newUsername)
+		exists, err = um.userStore.UserExists(newUsername)
 		if err != nil {
 			return fmt.Errorf("error checking new username existence: %w", err)
 		}
@@ -110,34 +124,39 @@ func (um *UserManager) UserUpdate(oldUsername, newUsername, newPassword string) 
 		return fmt.Errorf("cannot change password for default user")
 	}
 
-	err = um.store.UserUpdate(oldUsername, newUsername, newPassword)
+	// Update the user
+	err = um.userStore.UserUpdate(oldUsername, newUsername, newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
 	// Update current user if it was modified
-	if um.currentUser == oldUsername && newUsername != "" {
-		um.currentUser = newUsername
+	if um.currentUser.Username == oldUsername && newUsername != "" {
+		um.currentUser.Username = newUsername
 	}
 
 	return nil
 }
 
+// UserAuthenticate verifies a user's credentials.
 func (um *UserManager) UserAuthenticate(username, password string) (bool, error) {
-	authenticated, err := um.store.UserAuthenticate(username, password)
+	authenticated, err := um.userStore.UserAuthenticate(username, password)
 	if err != nil {
 		return false, fmt.Errorf("authentication error: %w", err)
 	}
 	return authenticated, nil
 }
 
+// UserSelect sets the current user.
 func (um *UserManager) UserSelect(username string) error {
+	// If username is empty, deselect the current user
 	if username == "" {
 		um.UserReset()
 		return nil
 	}
 
-	exists, err := um.store.UserExists(username)
+	// Check if the user exists
+	exists, err := um.userStore.UserExists(username)
 	if err != nil {
 		return fmt.Errorf("error checking user existence: %w", err)
 	}
@@ -145,21 +164,24 @@ func (um *UserManager) UserSelect(username string) error {
 		return fmt.Errorf("user '%s' does not exist", username)
 	}
 
-	um.currentUser = username
+	// Set the current user and reset the mindmap
+	um.currentUser.Username = username
 	if um.mindmapManager != nil {
 		um.mindmapManager.MindmapReset()
 	}
-	um.mindmapManager.CurrentUser = username
+	um.mindmapManager.currentUser = username
 	return nil
 }
 
+// UserReset clears the current user selection.
 func (um *UserManager) UserReset() {
-	um.currentUser = ""
+	um.currentUser = &models.UserInfo{}
 	if um.mindmapManager != nil {
 		um.mindmapManager.MindmapReset()
 	}
 }
 
-func (um *UserManager) UserGet() string {
+// UserGet returns the currently selected user.
+func (um *UserManager) UserGet() *models.UserInfo {
 	return um.currentUser
 }

@@ -1,3 +1,5 @@
+// Package cli provides the command-line interface functionality for Mindnoscape.
+// This file contains handlers for system-related commands.
 package cli
 
 import (
@@ -6,32 +8,35 @@ import (
 	//	"mindnoscape/local-app/internal/ui"
 )
 
-// SystemExit handles the 'system exit' command
+// SystemExit handles the 'system exit' command, which terminates the program.
 func (c *CLI) SystemExit() error {
-	c.UI.Println("Exiting...")
+	c.UI.Message("Exiting...")
 	return io.EOF
 }
 
-// SystemQuit handles the 'system quit' command
+// SystemQuit handles the 'system quit' command, which is equivalent to 'system exit'.
 func (c *CLI) SystemQuit() error {
 	return c.SystemExit()
 }
 
-// SystemInfo handles the 'system' command
+// SystemInfo handles the 'system' command, displaying general system information.
 func (c *CLI) SystemInfo(args []string) error {
-	c.UI.Println("System Information:")
+	// Print system information header
+	c.UI.Message("System Information:")
 
+	// Display current user information
 	currentUser := c.Data.UserManager.UserGet()
-	if currentUser == "" {
-		c.UI.Println("Current User: No user selected")
+	if currentUser.Username == "" {
+		c.UI.Info("No user selected.")
 	} else {
-		c.UI.Printf("Current User: %s\n", currentUser)
+		c.UI.Info(fmt.Sprintf("Current User: %s", currentUser.Username))
 	}
 
-	if c.Data.MindmapManager.CurrentMindmap != nil {
-		c.UI.Printf("Current Mindmap: %s\n", c.Data.MindmapManager.CurrentMindmap.Name)
+	// Display current mindmap information
+	if c.Data.MindmapManager.MindmapGet() != nil {
+		c.UI.Info(fmt.Sprintf("Current Mindmap: %s", c.Data.MindmapManager.MindmapGet().Name))
 	} else {
-		c.UI.Println("Current Mindmap: None selected")
+		c.UI.Info("No mindmap selected.")
 	}
 
 	// TODO: Add more system information in future implementations
@@ -46,12 +51,14 @@ func (c *CLI) SystemInfo(args []string) error {
 	return nil
 }
 
-// ExecuteSystemCommand routes the system command to the appropriate handler
+// ExecuteSystemCommand routes the system command to the appropriate handler.
 func (c *CLI) ExecuteSystemCommand(args []string) error {
+	// If no arguments, show system info
 	if len(args) == 0 {
 		return c.SystemInfo(args)
 	}
 
+	// Route to specific system command handlers
 	operation := args[0]
 	switch operation {
 	case "exit":

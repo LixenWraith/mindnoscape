@@ -1,3 +1,5 @@
+// Package main is the entry point for the Mindnoscape application.
+// It initializes all components and runs the main program loop.
 package main
 
 import (
@@ -16,6 +18,8 @@ import (
 	"mindnoscape/local-app/internal/ui"
 )
 
+// main is the entry point of the application. It initializes all components,
+// sets up signal handling, and runs the main program loop.
 func main() {
 	// Set up channel to receive interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -30,7 +34,7 @@ func main() {
 
 	// Initialize UI
 	UI := ui.NewUI(os.Stdout, true)
-	UI.Info("Welcome to Mindnoscape! Use 'help' for the list of commands.")
+	UI.Message("Welcome to Mindnoscape! Use 'help' for the list of commands.")
 
 	// Load configuration
 	if err := config.ConfigLoad(); err != nil {
@@ -96,7 +100,7 @@ func main() {
 			err := c.RunInteractive()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					UI.Println("Goodbye!")
+					UI.Message("Goodbye!")
 					return
 				}
 				logErr := logger.LogError(fmt.Errorf("main: %s", err.Error()))

@@ -1,7 +1,11 @@
+// Package cli provides the command-line interface functionality for Mindnoscape.
+// This file specifically handles the help system, providing detailed information
+// about commands and their usage to users.
 package cli
 
 import "fmt"
 
+// CommandHelp represents the structure of help information for a specific command.
 type CommandHelp struct {
 	Scope     string
 	Operation string
@@ -13,6 +17,8 @@ type CommandHelp struct {
 	Examples  []string
 }
 
+// HandleHelp processes the help command and displays appropriate help information.
+// It can show general help, scope-specific help, or operation-specific help.
 func (c *CLI) HandleHelp(args []string) error {
 	switch len(args) {
 	case 0:
@@ -26,53 +32,63 @@ func (c *CLI) HandleHelp(args []string) error {
 	}
 }
 
+// showGeneralHelp displays an overview of all available commands grouped by scope.
 func (c *CLI) showGeneralHelp() error {
-	c.UI.Println("Command syntax: <scope> [operation] [arguments] [options]")
-	c.UI.Println("\nAvailable commands:")
+	// Print the general command syntax
+	c.UI.Message("Command syntax: <scope> [operation] [arguments] [options]")
+	c.UI.Message("\nAvailable commands:")
 
+	// Iterate through command helps and print them grouped by scope
 	currentScope := ""
 	for _, cmd := range commandHelps {
 		if cmd.Scope != currentScope {
-			c.UI.Printf("\n%s:\n", cmd.Scope)
+			c.UI.Message("\n%s:\n", cmd.Scope)
 			currentScope = cmd.Scope
 		}
-		c.UI.Printf("  %-15s %s\n", cmd.Operation, cmd.ShortDesc)
+		c.UI.Message("  %-15s %s\n", cmd.Operation, cmd.ShortDesc)
 	}
 	return nil
 }
 
+// showScopeHelp displays help information for all commands within a specific scope.
 func (c *CLI) showScopeHelp(scope string) error {
-	c.UI.Printf("Commands for %s:\n\n", scope)
+	// Print the header for the scope
+	c.UI.Message("Commands for %s:\n\n", scope)
+
+	// Iterate through commands and print those matching the scope
 	for _, cmd := range commandHelps {
 		if cmd.Scope == scope {
-			c.UI.Printf("%-15s %s\n", cmd.Operation, cmd.ShortDesc)
+			c.UI.Message("%-15s %s\n", cmd.Operation, cmd.ShortDesc)
 		}
 	}
 	return nil
 }
 
+// showOperationHelp displays detailed help information for a specific operation within a scope.
 func (c *CLI) showOperationHelp(scope, operation string) error {
+	// Search for the matching command help
 	for _, cmd := range commandHelps {
 		if cmd.Scope == scope && cmd.Operation == operation {
-			c.UI.Printf("Command: %s %s\n", scope, operation)
-			c.UI.Printf("Description: %s\n", cmd.LongDesc)
-			c.UI.Printf("Syntax: %s\n", cmd.Syntax)
+			// Print detailed information about the command
+			c.UI.Message("Command: %s %s\n", scope, operation)
+			c.UI.Message("Description: %s\n", cmd.LongDesc)
+			c.UI.Message("Syntax: %s\n", cmd.Syntax)
 			if len(cmd.Arguments) > 0 {
-				c.UI.Println("Arguments:")
+				c.UI.Message("Arguments:")
 				for _, arg := range cmd.Arguments {
-					c.UI.Printf("  %s\n", arg)
+					c.UI.Message("  %s\n", arg)
 				}
 			}
 			if len(cmd.Options) > 0 {
-				c.UI.Println("Options:")
+				c.UI.Message("Options:")
 				for _, opt := range cmd.Options {
-					c.UI.Printf("  %s\n", opt)
+					c.UI.Message("  %s\n", opt)
 				}
 			}
 			if len(cmd.Examples) > 0 {
-				c.UI.Println("Examples:")
+				c.UI.Message("Examples:")
 				for _, ex := range cmd.Examples {
-					c.UI.Printf("  %s\n", ex)
+					c.UI.Message("  %s\n", ex)
 				}
 			}
 			return nil
@@ -81,6 +97,7 @@ func (c *CLI) showOperationHelp(scope, operation string) error {
 	return fmt.Errorf("no help found for %s %s", scope, operation)
 }
 
+// commandHelps is a slice of CommandHelp structs containing help information for all commands.
 var commandHelps = []CommandHelp{
 	{
 		Scope:     "user",
@@ -93,21 +110,21 @@ var commandHelps = []CommandHelp{
 	},
 	{
 		Scope:     "user",
-		Operation: "mod",
-		ShortDesc: "Modify an existing user",
-		LongDesc:  "Modifies the username or password of an existing user account.",
-		Syntax:    "user mod <username> [new_username] [new_password]",
-		Arguments: []string{"username: The name of the user to modify", "new_username: (Optional) The new username", "new_password: (Optional) The new password"},
-		Examples:  []string{"user mod john", "user mod john johnny", "user mod john johnny new_password"},
+		Operation: "update",
+		ShortDesc: "Update an existing user",
+		LongDesc:  "Updates the username or password of an existing user account.",
+		Syntax:    "user update <username> [new_username] [new_password]",
+		Arguments: []string{"username: The name of the user to update", "new_username: (Optional) The new username", "new_password: (Optional) The new password"},
+		Examples:  []string{"user update john", "user update john johnny", "user update john johnny new_password"},
 	},
 	{
 		Scope:     "user",
-		Operation: "del",
+		Operation: "delete",
 		ShortDesc: "Delete a user",
 		LongDesc:  "Deletes an existing user account and all associated mindmaps.",
-		Syntax:    "user del <username>",
+		Syntax:    "user delete <username>",
 		Arguments: []string{"username: The name of the user to delete"},
-		Examples:  []string{"user del john"},
+		Examples:  []string{"user delete john"},
 	},
 	{
 		Scope:     "user",
@@ -129,12 +146,12 @@ var commandHelps = []CommandHelp{
 	},
 	{
 		Scope:     "mindmap",
-		Operation: "del",
+		Operation: "delete",
 		ShortDesc: "Delete a mindmap",
 		LongDesc:  "Deletes the specified mindmap or all mindmaps owned by the current user if no name is provided.",
-		Syntax:    "mindmap del [mindmap_name]",
+		Syntax:    "mindmap delete [mindmap_name]",
 		Arguments: []string{"mindmap_name: (Optional) The name of the mindmap to delete"},
-		Examples:  []string{"mindmap del", "mindmap del my_ideas"},
+		Examples:  []string{"mindmap delete", "mindmap delete my_ideas"},
 	},
 	{
 		Scope:     "mindmap",
@@ -200,12 +217,12 @@ var commandHelps = []CommandHelp{
 	},
 	{
 		Scope:     "node",
-		Operation: "mod",
-		ShortDesc: "Modify a node",
-		LongDesc:  "Modifies the content or extra fields of an existing node.",
-		Syntax:    "node mod <node> <content> [<extra field label>:<extra field value>]... [--id]",
+		Operation: "update",
+		ShortDesc: "Update a node",
+		LongDesc:  "Updates the content or extra fields of an existing node.",
+		Syntax:    "node update <node> <content> [<extra field label>:<extra field value>]... [--id]",
 		Arguments: []string{"node: The node identifier to modify", "content: The new content for the node", "extra: (Optional) Extra fields to modify in the format label:value", "--id: (Optional) Use id instead of index"},
-		Examples:  []string{"node mod 1.1 \"Updated idea\"", "node mod 2 \"Changed content\" priority:low --id"},
+		Examples:  []string{"node update 1.1 \"Updated idea\"", "node update 2 \"Changed content\" priority:low --id"},
 	},
 	{
 		Scope:     "node",
@@ -218,12 +235,12 @@ var commandHelps = []CommandHelp{
 	},
 	{
 		Scope:     "node",
-		Operation: "del",
+		Operation: "delete",
 		ShortDesc: "Delete a node",
 		LongDesc:  "Deletes a node and its subtree from the current mindmap.",
-		Syntax:    "node del <node> [--id]",
+		Syntax:    "node delete <node> [--id]",
 		Arguments: []string{"node: The identifier of the node to delete", "--id: (Optional) Use id instead of index"},
-		Examples:  []string{"node del 1.2", "node del 3 --id"},
+		Examples:  []string{"node delete 1.2", "node delete 3 --id"},
 	},
 	{
 		Scope:     "node",
