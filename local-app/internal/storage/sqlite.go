@@ -45,7 +45,7 @@ func NewSQLiteStore(dbDir, dbFile string) (*SQLiteStore, error) {
 	}
 
 	store.NodeStore = NewSQLiteNodeStorage(db)
-	store.MindmapStore = NewSQLiteMindmapStorage(db)
+	store.MindmapStore = NewSQLiteMindmapStorage(db, store)
 	store.UserStore = NewSQLiteUserStorage(db)
 
 	return store, nil
@@ -58,41 +58,63 @@ func (s *SQLiteStore) Close() error {
 
 // initSchema initializes the database schema.
 func (s *SQLiteStore) initSchema() error {
-	// Create tables if they don't exist
 	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			username TEXT PRIMARY KEY,
-			password_hash TEXT NOT NULL
-		);
-
-		CREATE TABLE IF NOT EXISTS mindmaps (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			owner TEXT NOT NULL,
-			is_public BOOLEAN NOT NULL DEFAULT 0,
-			FOREIGN KEY (owner) REFERENCES users(username),
-			UNIQUE (name, owner)
-		);
-
-        CREATE TABLE IF NOT EXISTS nodes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mindmap_id INTEGER NOT NULL,
-            parent_id INTEGER,
-            content TEXT,
-            node_index TEXT,
-            FOREIGN KEY (mindmap_id) REFERENCES mindmaps(id)
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL
         );
 
-		CREATE TABLE IF NOT EXISTS node_attributes (
-			node_id INTEGER,
-			key TEXT,
-			value TEXT,
-			FOREIGN KEY (node_id) REFERENCES nodes(id)
-		);
-	`)
+        CREATE TABLE IF NOT EXISTS mindmaps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            is_public BOOLEAN NOT NULL DEFAULT 0,
+            FOREIGN KEY (owner) REFERENCES users(username),
+            UNIQUE (name, owner)
+        );
+    `)
 
 	if err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
+	}
+
+	return nil
+}
+
+// createMindmapTables creates tables for a mindmap
+func (s *SQLiteStore) createMindmapTables(tx *sql.Tx, mindmapID int) error {
+	_, err := tx.Exec(fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS nodes_%d (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            parent_id INTEGER,
+            content TEXT,
+            node_index TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS node_attributes_%d (
+            node_id INTEGER,
+            key TEXT,
+            value TEXT,
+            FOREIGN KEY (node_id) REFERENCES nodes_%d(id)
+        );
+    `, mindmapID, mindmapID, mindmapID))
+
+	if err != nil {
+		return fmt.Errorf("failed to create tables for mindmap %d: %w", mindmapID, err)
+	}
+
+	return nil
+}
+
+// dropMindmapTables drops tables for a mindmap
+func (s *SQLiteStore) dropMindmapTables(tx *sql.Tx, mindmapID int) error {
+	_, err := tx.Exec(fmt.Sprintf(`
+        DROP TABLE IF EXISTS nodes_%d;
+        DROP TABLE IF EXISTS node_attributes_%d;
+    `, mindmapID, mindmapID))
+
+	if err != nil {
+		return fmt.Errorf("failed to drop tables for mindmap %d: %w", mindmapID, err)
 	}
 
 	return nil

@@ -51,6 +51,14 @@ func (um *UserManager) UserExists(username string) (bool, error) {
 	return um.userStore.UserExists(username)
 }
 
+func (um *UserManager) UserCount() (int, error) {
+	count, err := um.userStore.UserCount()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get user count: %w", err)
+	}
+	return count, nil
+}
+
 // UserAdd creates a new user with the given username and password.
 func (um *UserManager) UserAdd(username, password string) error {
 	// Check if the user already exists

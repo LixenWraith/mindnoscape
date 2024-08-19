@@ -14,7 +14,7 @@ import (
 
 // NodeOperations defines the interface for node-related operations
 type NodeOperations interface {
-	NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool, skipHistory bool, id ...int) error
+	NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool, skipHistory bool, id ...int) (int, error)
 	NodeDelete(identifier string, useID bool, skipHistory bool) error
 	NodeUpdate(identifier string, content string, extra map[string]string, useID bool, skipHistory bool) error
 	NodeMove(sourceIdentifier, targetIdentifier string, useID bool, skipHistory bool) error
@@ -44,22 +44,30 @@ func NewNodeManager(mm *MindmapManager) *NodeManager {
 }
 
 // NodeAdd adds a new node to the current mindmap.
-func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool, skipHistory bool, id ...int) error {
+func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra map[string]string, useID bool, skipHistory bool, id ...int) (int, error) {
 	// Ensure a mindmap is selected and the user has ownership
 	if err := nm.ensureCurrentMindmap(); err != nil {
-		return fmt.Errorf("failed to ensure current mindmap: %w", err)
+		return 0, fmt.Errorf("failed to ensure current mindmap: %w", err)
 	}
 	if err := nm.checkOwnership(); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Find the parent node
 	parentNode, err := nm.findNodeByID(parentIdentifier, useID)
 	if err != nil {
-		return fmt.Errorf("failed to find parent node: %w", err)
+		return 0, fmt.Errorf("failed to find parent node: %w", err)
 	}
 	if parentNode == nil {
-		return fmt.Errorf("parent node not found")
+		return 0, fmt.Errorf("parent node not found")
+	}
+
+	// Count nodes with the same content
+	copies := 0
+	for _, node := range nm.mm.currentMindmap.Nodes {
+		if node.Content == content {
+			copies += 1
+		}
 	}
 
 	// Create the new node
@@ -96,8 +104,9 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 		newID, err = nm.nodeStore.NodeAdd(nm.mm.currentMindmap.Name, nm.mm.currentUser, parentNode.ID, newNode.Content, newNode.Extra, newNode.Index)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to add node to storage: %w", err)
+		return copies, fmt.Errorf("failed to add node to storage: %w", err)
 	}
+	copies += 1
 
 	// Use the auto-incremented id assigned by db as id
 	newNode.ID = newID
@@ -120,7 +129,7 @@ func (nm *NodeManager) NodeAdd(parentIdentifier string, content string, extra ma
 		nm.historyManager.HistoryAdd(op)
 	}
 
-	return nil
+	return copies, nil
 }
 
 // NodeDelete removes a node and its subtree from the current mindmap.
@@ -150,14 +159,15 @@ func (nm *NodeManager) NodeDelete(identifier string, useID bool, skipHistory boo
 		return fmt.Errorf("old parent node not found")
 	}
 
-	// Collect all nodes in the subtree to be deleted for undo
-	deletedTree := []*models.Node{node}
-	nm.getSubtreeNodes(node, &deletedTree)
+	// Collect all nodes in the subtree to be deleted
+	nodesToDelete := []*models.Node{node}
+	nm.getSubtreeNodes(node, &nodesToDelete)
 
 	// Remove from storage
-	for _, n := range deletedTree {
-		if err := nm.nodeStore.NodeDelete(nm.mm.currentMindmap.Name, nm.mm.currentUser, n.ID); err != nil {
-			return fmt.Errorf("failed to delete node from storage: %w", err)
+	for _, n := range nodesToDelete {
+		err = nm.nodeStore.NodeDelete(nm.mm.currentMindmap.Name, nm.mm.currentUser, n.ID)
+		if err != nil {
+			return fmt.Errorf("failed to delete node %d from storage: %w", n.ID, err)
 		}
 	}
 
@@ -169,7 +179,7 @@ func (nm *NodeManager) NodeDelete(identifier string, useID bool, skipHistory boo
 		}
 	}
 
-	// Delete the node and its descendants recursively
+	// Delete the node and its descendants recursively from the in-memory structure
 	nm.deleteNodeRecursive(node)
 
 	// Update indexes
@@ -186,7 +196,7 @@ func (nm *NodeManager) NodeDelete(identifier string, useID bool, skipHistory boo
 				ID:       node.ID,
 				ParentID: node.ParentID,
 			},
-			DeletedTree: deletedTree,
+			DeletedTree: nodesToDelete,
 		}
 		nm.historyManager.HistoryAdd(op)
 	}
@@ -431,7 +441,7 @@ func (nm *NodeManager) NodeRedo() error {
 
 	switch op.Type {
 	case OpAdd:
-		err = nm.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true, true, op.AffectedNode.ID)
+		_, err = nm.NodeAdd(strconv.Itoa(op.AffectedNode.ParentID), op.NewContent, op.NewExtra, true, true, op.AffectedNode.ID)
 	case OpDelete:
 		err = nm.NodeDelete(strconv.Itoa(op.AffectedNode.ID), true, true)
 	case OpMove:
@@ -626,7 +636,7 @@ func (nm *NodeManager) updateSubtreeIndex(node *models.Node) error {
 // restoreSubtree recreates a deleted subtree of nodes.
 func (nm *NodeManager) restoreSubtree(nodes []*models.Node) error {
 	for _, node := range nodes {
-		err := nm.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true, true, node.ID)
+		_, err := nm.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true, true, node.ID)
 		if err != nil {
 			return fmt.Errorf("failed to restore node %d: %w", node.ID, err)
 		}

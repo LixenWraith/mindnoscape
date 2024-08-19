@@ -12,7 +12,10 @@ func (c *CLI) MindmapInfo(args []string) error {
 		c.UI.Info("No mindmap selected.")
 		return nil
 	}
-	c.UI.Info(fmt.Sprintf("Current mindmap: %s", c.Data.MindmapManager.MindmapGet().Name))
+	mindmap := c.Data.MindmapManager.MindmapGet()
+	c.UI.Info(fmt.Sprintf("Current mindmap: %s", mindmap.Name))
+	c.UI.Info(fmt.Sprintf("Number of nodes: %d", mindmap.NodeCount))
+	c.UI.Info(fmt.Sprintf("Depth: %d", mindmap.Depth))
 	return nil
 }
 
@@ -107,9 +110,9 @@ func (c *CLI) MindmapPermission(args []string) error {
 	permission := args[1]
 	var isPublic bool
 	switch permission {
-	case "public":
+	case "public", "+":
 		isPublic = true
-	case "private":
+	case "private", "-":
 		isPublic = false
 	default:
 		return fmt.Errorf("invalid permission option: use 'public' or 'private'")

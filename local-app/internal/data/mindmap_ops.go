@@ -161,7 +161,7 @@ func (mm *MindmapManager) MindmapSelect(name string) error {
 	}
 
 	// Load nodes for the selected mindmap
-	nodes, err := mm.nodeStore.NodeGetAll(name, mm.currentUser)
+	nodes, err := mm.nodeStore.NodeGetAll(name, mindmapInfo.Owner)
 	if err != nil {
 		return fmt.Errorf("failed to load nodes for mindmap '%s': %w", name, err)
 	}
@@ -207,12 +207,40 @@ func (mm *MindmapManager) MindmapGet() *models.MindmapInfo {
 	if mm.currentMindmap == nil {
 		return nil
 	}
+	nodeCount := len(mm.currentMindmap.Nodes)
+	depth := mm.calculateMindmapDepth(mm.currentMindmap.Root)
 	return &models.MindmapInfo{
-		ID:       mm.currentMindmap.ID,
-		Name:     mm.currentMindmap.Name,
-		IsPublic: mm.currentMindmap.IsPublic,
-		Owner:    mm.currentMindmap.Owner,
+		ID:        mm.currentMindmap.ID,
+		Name:      mm.currentMindmap.Name,
+		IsPublic:  mm.currentMindmap.IsPublic,
+		Owner:     mm.currentMindmap.Owner,
+		NodeCount: nodeCount,
+		Depth:     depth,
 	}
+}
+
+func (mm *MindmapManager) MindmapCount() (int, error) {
+	count, err := mm.mindmapStore.MindmapCount()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get mindmap count: %w", err)
+	}
+	return count, nil
+}
+
+func (mm *MindmapManager) MindmapCountOwned(username string) (int, error) {
+	count, err := mm.mindmapStore.MindmapCountOwned(username)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count user owned mindmaps: %w", err)
+	}
+	return count, nil
+}
+
+func (mm *MindmapManager) MindmapsCountPermitted(username string) (int, error) {
+	count, err := mm.mindmapStore.MindmapCountPermitted(username)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count accessible mindmaps: %w", err)
+	}
+	return count, nil
 }
 
 // MindmapList returns a list of all accessible mindmaps for the current user.
@@ -232,6 +260,12 @@ func (mm *MindmapManager) MindmapList() ([]models.MindmapInfo, error) {
 	var filteredMindmaps []models.MindmapInfo
 	for _, m := range mindmaps {
 		if m.IsPublic || m.Owner == mm.currentUser {
+			nodes, err := mm.nodeStore.NodeGetAll(m.Name, mm.currentUser)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get nodes for mindmap %s: %w", m.Name, err)
+			}
+			m.NodeCount = len(nodes)
+			m.Depth = mm.calculateMindmapDepth(buildTreeFromNodes(nodes))
 			filteredMindmaps = append(filteredMindmaps, m)
 		}
 	}
@@ -336,7 +370,7 @@ func (mm *MindmapManager) MindmapImport(filename, format string) (*models.Mindma
 			return nil
 		}
 		// Pass the original node ID to NodeAdd
-		err := mm.nodeManager.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true, true, node.ID)
+		_, err := mm.nodeManager.NodeAdd(strconv.Itoa(node.ParentID), node.Content, node.Extra, true, true, node.ID)
 		if err != nil {
 			return fmt.Errorf("failed to add node %d: %w", node.ID, err)
 		}
@@ -413,4 +447,38 @@ func (mm *MindmapManager) validateMindmap(mindmap *models.Mindmap) error {
 	}
 
 	return validateParentIDs(mindmap.Root)
+}
+
+func (mm *MindmapManager) calculateMindmapDepth(root *models.Node) int {
+	if root == nil {
+		return 0
+	}
+	maxDepth := 0
+	for _, child := range root.Children {
+		depth := mm.calculateMindmapDepth(child)
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+	}
+	return maxDepth + 1
+}
+
+func buildTreeFromNodes(nodes []*models.Node) *models.Node {
+	nodeMap := make(map[int]*models.Node)
+	var root *models.Node
+	for _, node := range nodes {
+		nodeMap[node.ID] = node
+		if node.ParentID == -1 {
+			root = node
+		}
+	}
+	for _, node := range nodes {
+		if node != root {
+			parent := nodeMap[node.ParentID]
+			if parent != nil {
+				parent.Children = append(parent.Children, node)
+			}
+		}
+	}
+	return root
 }

@@ -34,21 +34,32 @@ func (mui *MindmapUI) MindmapList(mindmaps []models.MindmapInfo, currentUser str
 	// Display the list of mindmaps
 	mui.visualizer.Println("Available mindmaps:")
 	for _, mm := range mindmaps {
+		// Username
+		ownerColor := ColorWhite
+		if mm.Owner != currentUser {
+			ownerColor = ColorLightYellow
+		}
 		// Determine the permission symbol and color
 		permissionSymbol := "+"
 		permissionColor := ColorGreen
+		// Permission word
+		permissionText := "public"
 		if !mm.IsPublic {
 			permissionSymbol = "-"
 			permissionColor = ColorRed
+			permissionText = "private"
 		}
-
-		// Print the mindmap information
-		mui.visualizer.Print(mm.Name + " ")
+		// Mindmap ID
+		mui.visualizer.PrintColored(fmt.Sprintf("%d. ", mm.ID), ColorYellow)
+		// Mindmap name
+		mui.visualizer.Print(fmt.Sprintf("%-20s @ ", mm.Name))
+		// Owner
+		mui.visualizer.PrintColored(fmt.Sprintf("%-15s ", mm.Owner), ownerColor)
+		// Permission
 		mui.visualizer.PrintColored(permissionSymbol, permissionColor)
-		if mm.Owner != currentUser {
-			mui.visualizer.Printf(" (owner: %s)", mm.Owner)
-		}
-		mui.visualizer.Println("")
+		mui.visualizer.Print(fmt.Sprintf(" %-7s ", permissionText))
+		// Node info
+		mui.visualizer.Printf("# %-4d <: %d\n", mm.NodeCount, mm.Depth)
 	}
 }
 

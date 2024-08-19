@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -79,14 +80,21 @@ func (u *UI) Prompt(username, mindmap string) {
 
 func (u *UI) GetPromptString(username, mindmap string) string {
 	var promptBuilder strings.Builder
+
+	// Add current time
+	currentTime := time.Now().Format("[15:04:05] ")
+	promptBuilder.WriteString(u.colorize(currentTime, ColorGray))
+
+	if mindmap != "" {
+		promptBuilder.WriteString(u.colorize(mindmap, ColorLightBlue))
+		promptBuilder.WriteString(u.colorize(" @ ", ColorWhite))
+	}
+
 	if username != "" {
 		promptBuilder.WriteString(u.colorize(username, ColorLightPurple))
-		if mindmap != "" {
-			promptBuilder.WriteString(u.colorize(" @ ", ColorWhite))
-			promptBuilder.WriteString(u.colorize(mindmap, ColorLightBlue))
-		}
 		promptBuilder.WriteString(" ")
 	}
+
 	promptBuilder.WriteString(u.colorize("> ", ColorGreen))
 	return promptBuilder.String()
 }

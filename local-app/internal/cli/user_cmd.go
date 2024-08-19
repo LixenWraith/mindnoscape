@@ -12,9 +12,23 @@ func (c *CLI) UserInfo(args []string) error {
 	currentUser := c.Data.UserManager.UserGet()
 	if currentUser.Username == "" {
 		c.UI.Info("No user is currently selected.")
-	} else {
-		c.UI.Message("Current user: %s\n", currentUser)
+		return nil
 	}
+
+	c.UI.Message(fmt.Sprintf("Current user: %s", currentUser.Username))
+
+	ownedMindmaps, err := c.Data.MindmapManager.MindmapCountOwned(currentUser.Username)
+	if err != nil {
+		return fmt.Errorf("failed to count owned mindmaps: %w", err)
+	}
+	c.UI.Info(fmt.Sprintf("Owned mindmaps: %d", ownedMindmaps))
+
+	accessibleMindmaps, err := c.Data.MindmapManager.MindmapsCountPermitted(currentUser.Username)
+	if err != nil {
+		return fmt.Errorf("failed to count accessible mindmaps: %w", err)
+	}
+	c.UI.Info(fmt.Sprintf("Accessible mindmaps: %d", accessibleMindmaps))
+
 	return nil
 }
 
@@ -130,6 +144,7 @@ func (c *CLI) UserSelect(args []string) error {
 			return err
 		}
 		c.CurrentUser = nil
+		c.CurrentMindmap = nil
 		c.UI.Success("Deselected the current user.")
 		return nil
 	}
@@ -155,6 +170,8 @@ func (c *CLI) UserSelect(args []string) error {
 		return fmt.Errorf("failed to switch user: %v", err)
 	}
 
+	c.CurrentMindmap = nil
+	c.CurrentUser = nil
 	c.CurrentUser = c.Data.UserManager.UserGet()
 
 	c.UI.Success(fmt.Sprintf("Selected user: %s", username))

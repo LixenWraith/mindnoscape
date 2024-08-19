@@ -18,6 +18,7 @@ type UserStore interface {
 	UserGet(username string) (*models.User, error)
 	UserUpdate(oldUsername, newUsername, newHashedPassword string) error
 	UserAuthenticate(username, password string) (bool, error)
+	UserCount() (int, error)
 }
 
 // SQLiteUserStorage implements the UserStore interface using SQLite.
@@ -164,4 +165,13 @@ func (s *SQLiteUserStorage) UserAuthenticate(username, password string) (bool, e
 	}
 
 	return true, nil
+}
+
+func (s *SQLiteUserStorage) UserCount() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count users: %w", err)
+	}
+	return count, nil
 }

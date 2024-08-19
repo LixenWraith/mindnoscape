@@ -13,10 +13,12 @@ type Mindmap struct {
 
 // MindmapInfo contains basic information about a mindmap.
 type MindmapInfo struct {
-	ID       int
-	Name     string
-	IsPublic bool
-	Owner    string
+	ID        int
+	Name      string
+	IsPublic  bool
+	Owner     string
+	NodeCount int
+	Depth     int
 }
 
 // NewMindmap creates a new Mindmap instance with initialized fields.

@@ -21,32 +21,33 @@ func (c *CLI) SystemQuit() error {
 
 // SystemInfo handles the 'system' command, displaying general system information.
 func (c *CLI) SystemInfo(args []string) error {
-	// Print system information header
 	c.UI.Message("System Information:")
 
-	// Display current user information
-	currentUser := c.Data.UserManager.UserGet()
-	if currentUser.Username == "" {
-		c.UI.Info("No user selected.")
+	userCount, err := c.Data.UserManager.UserCount()
+	if err != nil {
+		return fmt.Errorf("failed to get user count: %w", err)
+	}
+	c.UI.Info(fmt.Sprintf("Number of users: %d", userCount))
+
+	mindmapCount, err := c.Data.MindmapManager.MindmapCount()
+	if err != nil {
+		return fmt.Errorf("failed to get mindmap count: %w", err)
+	}
+	c.UI.Info(fmt.Sprintf("Number of mindmaps: %d", mindmapCount))
+
+	if c.CurrentUser != nil {
+		c.UI.Info(fmt.Sprintf("Current User: %s", c.CurrentUser.Username))
 	} else {
-		c.UI.Info(fmt.Sprintf("Current User: %s", currentUser.Username))
+		c.UI.Info("No user selected.")
 	}
 
-	// Display current mindmap information
-	if c.Data.MindmapManager.MindmapGet() != nil {
-		c.UI.Info(fmt.Sprintf("Current Mindmap: %s", c.Data.MindmapManager.MindmapGet().Name))
+	if c.CurrentMindmap != nil {
+		c.UI.Info(fmt.Sprintf("Current Mindmap: %s", c.CurrentMindmap.Name))
+		c.UI.Info(fmt.Sprintf("Number of nodes: %d", c.CurrentMindmap.NodeCount))
+		c.UI.Info(fmt.Sprintf("Depth: %d", c.CurrentMindmap.Depth))
 	} else {
 		c.UI.Info("No mindmap selected.")
 	}
-
-	// TODO: Add more system information in future implementations
-	// Some ideas for future additions:
-	// - Number of users in the system
-	// - Total number of mindmaps
-	// - Database size
-	// - Application version
-	// - Last backup time
-	// - Current configuration settings
 
 	return nil
 }

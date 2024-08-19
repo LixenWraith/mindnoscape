@@ -1,7 +1,7 @@
-package storage
-
 // Package storage provides functionality for persisting and retrieving Mindnoscape data.
 // This file implements the storage operations for mindmaps using SQLite.
+package storage
+
 import (
 	"database/sql"
 	"fmt"
@@ -17,35 +17,52 @@ type MindmapStore interface {
 	MindmapExists(mindmapName string, username string) (bool, error)
 	MindmapPermission(mindmapName string, username string, setPublic ...bool) (bool, error)
 	MindmapGet(mindmapName string) (*models.MindmapInfo, error)
+	MindmapCount() (int, error)
+	MindmapCountOwned(username string) (int, error)
+	MindmapCountPermitted(username string) (int, error)
 }
 
 // SQLiteMindmapStorage implements the MindmapStore interface using SQLite.
 type SQLiteMindmapStorage struct {
-	db *sql.DB
+	db    *sql.DB
+	store *SQLiteStore
 }
 
 // NewSQLiteMindmapStorage creates a new SQLiteMindmapStorage instance.
-func NewSQLiteMindmapStorage(db *sql.DB) *SQLiteMindmapStorage {
-	return &SQLiteMindmapStorage{db: db}
+func NewSQLiteMindmapStorage(db *sql.DB, store *SQLiteStore) *SQLiteMindmapStorage {
+	return &SQLiteMindmapStorage{db: db, store: store}
 }
 
 // MindmapAdd adds a new mindmap to the database.
 func (s *SQLiteMindmapStorage) MindmapAdd(mindmapName string, owner string, isPublic bool) (int, error) {
-	// Validate input
-	if owner == "" {
-		return 0, fmt.Errorf("owner cannot be empty")
+	// Start a transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 
 	// Insert the new mindmap
-	result, err := s.db.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", mindmapName, owner, isPublic)
+	result, err := tx.Exec("INSERT INTO mindmaps (name, owner, is_public) VALUES (?, ?, ?)", mindmapName, owner, isPublic)
 	if err != nil {
 		return 0, fmt.Errorf("failed to add mindmap: %w", err)
 	}
 
-	// Get and return the last inserted ID
+	// Get the last inserted ID
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
+	}
+
+	// Create tables for the new mindmap
+	err = s.store.createMindmapTables(tx, int(id))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create tables for mindmap %d: %w", id, err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return int(id), nil
@@ -67,28 +84,16 @@ func (s *SQLiteMindmapStorage) MindmapDelete(name string, username string) error
 		return fmt.Errorf("failed to get mindmap ID: %w", err)
 	}
 
-	// Delete associated node attributes
-	_, err = tx.Exec("DELETE FROM node_attributes WHERE node_id IN (SELECT id FROM nodes WHERE mindmap_id = ?)", mindmapID)
+	// Drop the mindmap's tables
+	err = s.store.dropMindmapTables(tx, mindmapID)
 	if err != nil {
-		return fmt.Errorf("failed to delete node attributes: %w", err)
+		return err
 	}
 
-	// Delete associated nodes
-	_, err = tx.Exec("DELETE FROM nodes WHERE mindmap_id = ?", mindmapID)
-	if err != nil {
-		return fmt.Errorf("failed to delete nodes: %w", err)
-	}
-
-	// Delete the mindmap
+	// Delete the mindmap from the mindmaps table
 	_, err = tx.Exec("DELETE FROM mindmaps WHERE id = ?", mindmapID)
 	if err != nil {
 		return fmt.Errorf("failed to delete mindmap: %w", err)
-	}
-
-	// Reset auto-increment counter of the mindmap
-	_, err = tx.Exec("DELETE FROM sqlite_sequence WHERE name IN ('mindmaps', 'nodes', 'node_attributes')")
-	if err != nil {
-		return fmt.Errorf("failed to reset auto-increment counters: %w", err)
 	}
 
 	// Commit the transaction
@@ -108,7 +113,7 @@ func (s *SQLiteMindmapStorage) MindmapGetAll(username string) ([]models.MindmapI
 	}
 	defer rows.Close()
 
-	// Scan the results into MindmapInfo structs
+	// Scan the results into a MindmapInfo slice
 	var mindmaps []models.MindmapInfo
 	for rows.Next() {
 		var m models.MindmapInfo
@@ -117,7 +122,6 @@ func (s *SQLiteMindmapStorage) MindmapGetAll(username string) ([]models.MindmapI
 		}
 		mindmaps = append(mindmaps, m)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating mindmap rows: %w", err)
 	}
@@ -190,4 +194,31 @@ func (s *SQLiteMindmapStorage) MindmapGet(name string) (*models.MindmapInfo, err
 		return nil, fmt.Errorf("failed to get mindmap info: %w", err)
 	}
 	return &info, nil
+}
+
+func (s *SQLiteMindmapStorage) MindmapCount() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count mindmaps: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteMindmapStorage) MindmapCountOwned(username string) (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE owner = ?", username).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count user owned mindmaps: %w", err)
+	}
+	return count, nil
+}
+
+func (s *SQLiteMindmapStorage) MindmapCountPermitted(username string) (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM mindmaps WHERE owner = ? OR is_public = 1", username).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count accessible mindmaps: %w", err)
+	}
+	return count, nil
 }

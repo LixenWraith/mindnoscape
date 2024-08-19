@@ -37,9 +37,14 @@ func (c *CLI) NodeAdd(args []string) error {
 	}
 
 	// Add the new node
-	err := c.Data.NodeManager.NodeAdd(parentIdentifier, content, extra, useID, false)
+	// Add the new node
+	copies, err := c.Data.NodeManager.NodeAdd(parentIdentifier, content, extra, useID, false)
 	if err != nil {
 		return err
+	}
+
+	if copies > 1 {
+		c.UI.Warning(fmt.Sprintf("There are now %d nodes with the content '%s'", copies, content))
 	}
 
 	c.UI.Success("Node added successfully.")

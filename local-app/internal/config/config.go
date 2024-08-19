@@ -44,7 +44,7 @@ func ConfigLoad() error {
 			LogFolder:         "./log",
 			CommandLog:        "commands.log",
 			ErrorLog:          "errors.log",
-			DefaultUser:       "default",
+			DefaultUser:       "a",
 			DefaultUserActive: true,
 		}
 		if err := ConfigSave(defaultConfig); err != nil {
