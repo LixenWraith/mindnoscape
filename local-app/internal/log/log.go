@@ -1,5 +1,4 @@
 // Package log provides functionality for logging commands and errors
-// in the application.
 package log
 
 import (

@@ -1,335 +1,418 @@
-// Package cli provides the command-line interface functionality for Mindnoscape.
-// It handles user input, command execution, and interaction with the data layer.
 package cli
 
 import (
-	"bufio"
 	"fmt"
 	"io"
-	"mindnoscape/local-app/internal/models"
 	"os"
-	"regexp"
 	"strings"
 
-	"mindnoscape/local-app/internal/data"
-	"mindnoscape/local-app/internal/log"
-	"mindnoscape/local-app/internal/ui"
+	"mindnoscape/local-app/internal/adapter"
+	"mindnoscape/local-app/internal/model"
 )
 
-// CLI represents the command-line interface of the application.
-// It manages user interactions, data operations, and output rendering.
+// CLI represents the command-line interface
 type CLI struct {
-	CurrentUser    *models.UserInfo
-	CurrentMindmap *models.MindmapInfo
-	Data           *data.Manager
-	UI             *ui.UI
-	Logger         *log.Logger
+	adapter adapter.AdapterInstance
+	stopCh  chan struct{}
+	reader  io.Reader
+	writer  io.Writer
 }
 
-// NewCLI creates and initializes a new CLI instance.
-// It sets up the data manager, logger, and user interface components.
-func NewCLI(dataManager *data.Manager, logger *log.Logger) (*CLI, error) {
-	cli := &CLI{
-		Data: dataManager,
-		CurrentUser: &models.UserInfo{
-			Username: "",
-		},
-		CurrentMindmap: &models.MindmapInfo{
-			Name: "",
-		},
-		UI:     ui.NewUI(os.Stdout, true),
-		Logger: logger,
-	}
-	return cli, nil
+// NewCLI creates a new CLI instance
+func NewCLI(adapter adapter.AdapterInstance) (*CLI, error) {
+	return &CLI{
+		adapter: adapter,
+		stopCh:  make(chan struct{}),
+		reader:  os.Stdin,
+		writer:  os.Stdout,
+	}, nil
 }
 
-// promptForInput asks the user for input with the given prompt and returns the trimmed response.
-func (c *CLI) promptForInput(prompt string) (string, error) {
-	input, err := c.UI.ReadLine(prompt)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(input), nil
-}
+// Run starts the CLI and handles user input
+func (c *CLI) Run() error {
+	fmt.Println("Welcome to Mindnoscape CLI!")
+	fmt.Println("Type 'help' for a list of commands or 'exit' to quit.")
 
-// promptForPassword securely asks the user for a password and returns it.
-func (c *CLI) promptForPassword(prompt string) (string, error) {
-	return c.UI.ReadPassword(prompt)
-}
-
-// ExecuteScript runs a series of commands from a script file.
-func (c *CLI) ExecuteScript(filename string) error {
-	// Open the script file
-	f, err := os.Open(filename)
-	if err != nil {
-		return fmt.Errorf("failed to open script file: %v", err)
+	if err := c.adapter.AdapterStart(); err != nil {
+		return fmt.Errorf("failed to start CLI adapter: %w", err)
 	}
 	defer func() {
-		closeErr := f.Close()
-		if closeErr != nil && err == nil {
-			err = closeErr
+		if err := c.adapter.AdapterStop(); err != nil {
+			fmt.Printf("Error stopping CLI adapter: %v\n", err)
 		}
 	}()
 
-	// Create a scanner to read the file line by line
-	scanner := bufio.NewScanner(f)
+	fmt.Println("DEBUG: CLI adapter started")
 
-	// Iterate through each line in the script
-	for scanner.Scan() {
-		var username, mindmapName string
-		if c.CurrentUser != nil {
-			username = c.CurrentUser.Username
-		}
-		if c.CurrentMindmap != nil {
-			mindmapName = c.CurrentMindmap.Name
-		}
-		c.UI.Prompt(username, mindmapName)
-		command := scanner.Text()
-		c.UI.Message(command)
-
-		logEntry := fmt.Sprintf("%s [%s] %s", filename, command)
-		if err := c.Logger.LogCommand(logEntry); err != nil {
-			c.UI.Warning(fmt.Sprintf("Failed to log command: %v", err))
-		}
-
-		args := c.ParseArgs(command)
-		if err := c.ExecuteCommand(args); err != nil {
-			strippedErr := stripColorCodes(err.Error())
-			if logErr := c.Logger.LogError(fmt.Errorf("%s", strippedErr)); logErr != nil {
-				c.UI.Warning(fmt.Sprintf("Failed to log error: %v", logErr))
+	// Main loop
+	for {
+		fmt.Print("> ")
+		input, err := c.readLine()
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
-			c.UI.Error(err.Error())
+			fmt.Printf("Error reading input: %v\n", err)
+			continue
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading script file: %v", err)
-	}
-
-	return nil
-
-}
-
-// RunInteractive handles a single iteration of the interactive command-line loop.
-// It reads user input, processes the command, and updates the application state.
-func (c *CLI) RunInteractive() error {
-	// Prepare prompt parts
-	var username, mindmapName string // Setting empty strings for nil current user and current mindmap variables
-	if c.CurrentUser != nil {
-		username = c.CurrentUser.Username
-	}
-	if c.CurrentMindmap != nil {
-		mindmapName = c.CurrentMindmap.Name
-	}
-
-	// Read user input
-	line, err := c.UI.ReadLine(c.UI.GetPromptString(username, mindmapName))
-	if err != nil {
-		if err == io.EOF || err == ui.ErrInterrupted {
-			return io.EOF
+		if input == "exit" || input == "quit" {
+			break
 		}
-		return fmt.Errorf("error reading input: %v", err)
-	}
 
-	line = strings.TrimSpace(line)
-	if len(line) == 0 {
-		return nil
-	}
-
-	// Log command
-	logEntry := fmt.Sprintf("%s", line)
-	err = c.Logger.LogCommand(logEntry)
-	if err != nil {
-		c.UI.Warning(fmt.Sprintf("Failed to log command: %v", err))
-	}
-
-	// Parse the input into arguments
-	args := c.ParseArgs(line)
-
-	// Execute the command
-	err = c.ExecuteCommand(args)
-	if err != nil {
-		// Strip color codes from error message before logging
-		strippedErr := stripColorCodes(err.Error())
-		if logErr := c.Logger.LogError(fmt.Errorf("%s", strippedErr)); logErr != nil {
-			c.UI.Warning(fmt.Sprintf("Failed to log error: %v", logErr))
+		// Parse input into model.Command
+		cmd, err := c.parseCommand(input)
+		if err != nil {
+			fmt.Printf("Error parsing command: %v\n", err)
+			continue
 		}
-		if err == io.EOF {
-			return err
-		}
-		c.UI.Error(err.Error())
-	}
 
-	return nil
-}
-
-// ParseArgs splits an input string into a slice of argument strings,
-// handling quoted arguments as single units.
-func (c *CLI) ParseArgs(input string) []string {
-	var args []string
-	var currentArg strings.Builder
-	inQuotes := false
-
-	for _, char := range input {
-		switch char {
-		case '"':
-			inQuotes = !inQuotes
-		case ' ':
-			if !inQuotes {
-				if currentArg.Len() > 0 {
-					args = append(args, currentArg.String())
-					currentArg.Reset()
-				}
+		// Check for help command
+		if cmd.Scope == "help" {
+			// Split input into words
+			args := strings.Fields(input)
+			if len(args) == 0 { // General help
+				c.printHelp(nil)
 			} else {
-				currentArg.WriteRune(char)
+				c.printHelp(args[1:])
 			}
-		default:
-			currentArg.WriteRune(char)
+			continue
+		}
+
+		// Pass command to the adapter
+		result, err := c.adapter.CommandProcess(cmd)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		} else if result != nil {
+			fmt.Printf("Result: %v\n", result)
 		}
 	}
 
-	if currentArg.Len() > 0 {
-		args = append(args, currentArg.String())
-	}
-
-	return args
+	return nil
 }
 
-// ExecuteCommand routes the parsed command to the appropriate handler based on the command scope.
-func (c *CLI) ExecuteCommand(args []string) error {
+// readLine reads a line of input from the reader
+func (c *CLI) readLine() (string, error) {
+	var line strings.Builder
+	for {
+		var b [1]byte
+		n, err := c.reader.Read(b[:])
+		if err != nil {
+			if err == io.EOF && line.Len() > 0 {
+				return line.String(), nil
+			}
+			return "", err
+		}
+		if n == 0 {
+			continue
+		}
+		if b[0] == '\n' {
+			return line.String(), nil
+		}
+		line.WriteByte(b[0])
+	}
+}
+
+// Stop signals the CLI to stop its main loop
+func (c *CLI) Stop() {
+	close(c.stopCh)
+}
+
+// parseCommand parses user input into a model.Command
+func (c *CLI) parseCommand(input string) (model.Command, error) {
+	args := strings.Fields(input)
 	if len(args) == 0 {
-		return fmt.Errorf("no command provided")
+		return model.Command{}, fmt.Errorf("empty command")
 	}
 
-	// Expand short command to full command
-	if len(args) >= 2 {
-		args[0], args[1] = c.expandCommand(args[0], args[1])
+	cmd := model.Command{
+		Scope:     strings.ToLower(args[0]),
+		Operation: "",
+		Args:      []string{},
 	}
 
-	var err error
-	// Route the command to the appropriate handler
-	switch args[0] {
-	case "user":
+	if len(args) > 1 {
+		cmd.Operation = strings.ToLower(args[1])
+		cmd.Args = args[2:]
+	}
 
-		err = c.ExecuteUserCommand(args[1:])
-	case "mindmap":
-		err = c.ExecuteMindmapCommand(args[1:])
-	case "node":
+	return cmd, nil
+}
 
-		err = c.ExecuteNodeCommand(args[1:])
-	case "system":
-
-		err = c.ExecuteSystemCommand(args[1:])
-	case "help":
-
-		err = c.HandleHelp(args[1:])
+// printHelp prints the help message based on the provided arguments
+func (c *CLI) printHelp(args []string) {
+	switch len(args) {
+	case 0:
+		c.showGeneralHelp()
+	case 1:
+		c.showScopeHelp(args[0])
+	case 2:
+		c.showOperationHelp(args[0], args[1])
 	default:
-
-		err = fmt.Errorf("unknown command: %s", args[0])
+		fmt.Println("Invalid help command. Use 'help [scope] [operation]'")
 	}
-
-	return err
 }
 
-// expandCommand converts concise (one letter) commands and operations to the long (complete string) format.
-func (c *CLI) expandCommand(scope, operation string) (string, string) {
-	expandedScope := scope
-	expandedOperation := operation
-
-	// Expand scope if it's a single letter
-	if len(scope) == 1 {
-		switch scope {
-		case "s":
-			expandedScope = "system"
-		case "u":
-			expandedScope = "user"
-		case "m":
-			expandedScope = "mindmap"
-		case "n":
-			expandedScope = "node"
+// showGeneralHelp displays an overview of all available commands grouped by scope
+func (c *CLI) showGeneralHelp() {
+	fmt.Println("Command syntax: <scope> [operation] [arguments] [options]")
+	fmt.Println("\nAvailable commands:")
+	currentScope := ""
+	for _, cmd := range commandHelps {
+		if cmd.Scope != currentScope {
+			fmt.Printf("\n%s:\n", cmd.Scope)
+			currentScope = cmd.Scope
 		}
+		fmt.Printf("  %-15s %s\n", cmd.Operation, cmd.ShortDesc)
 	}
-
-	// Expand operation if it's a single letter
-	if len(operation) == 1 {
-		switch expandedScope {
-		case "user":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "d":
-				expandedOperation = "delete"
-			case "s":
-				expandedOperation = "select"
-			case "l":
-				expandedOperation = "list"
-			}
-		case "mindmap":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "d":
-				expandedOperation = "delete"
-			case "p":
-				expandedOperation = "permission"
-			case "i":
-				expandedOperation = "import"
-			case "e":
-				expandedOperation = "export"
-			case "s":
-				expandedOperation = "select"
-			case "l":
-				expandedOperation = "list"
-			case "v":
-				expandedOperation = "view"
-			case "c":
-				expandedOperation = "connect"
-			}
-		case "node":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "m":
-				expandedOperation = "move"
-			case "d":
-				expandedOperation = "delete"
-			case "f":
-				expandedOperation = "find"
-			case "s":
-				expandedOperation = "sort"
-			case "c":
-				expandedOperation = "connect"
-			case "-":
-				expandedOperation = "undo"
-			case "+":
-				expandedOperation = "redo"
-			}
-		case "system":
-			switch operation {
-			case "e":
-				expandedOperation = "exit"
-			case "q":
-				expandedOperation = "quit"
-			}
-		}
-	}
-
-	return expandedScope, expandedOperation
 }
 
-// stripColorCodes removes ANSI color codes and UI tags from the input string
-func stripColorCodes(input string) string {
-	// Remove ANSI color codes
-	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	withoutAnsi := ansiRegex.ReplaceAllString(input, "")
+// showScopeHelp displays help information for all commands within a specific scope
+func (c *CLI) showScopeHelp(scope string) {
+	fmt.Printf("Commands for %s:\n\n", scope)
+	for _, cmd := range commandHelps {
+		if cmd.Scope == scope {
+			fmt.Printf("%-15s %s\n", cmd.Operation, cmd.ShortDesc)
+		}
+	}
+}
 
-	// Remove UI tags (assuming they're in the format {{tag}})
-	uiTagRegex := regexp.MustCompile(`\{\{[^}]+\}\}`)
-	return uiTagRegex.ReplaceAllString(withoutAnsi, "")
+// showOperationHelp displays detailed help information for a specific operation within a scope
+func (c *CLI) showOperationHelp(scope, operation string) {
+	for _, cmd := range commandHelps {
+		if cmd.Scope == scope && cmd.Operation == operation {
+			fmt.Printf("Command: %s %s\n", scope, operation)
+			fmt.Printf("Description: %s\n", cmd.LongDesc)
+			fmt.Printf("Syntax: %s\n", cmd.Syntax)
+			if len(cmd.Arguments) > 0 {
+				fmt.Println("Arguments:")
+				for _, arg := range cmd.Arguments {
+					fmt.Printf("  %s\n", arg)
+				}
+			}
+			if len(cmd.Options) > 0 {
+				fmt.Println("Options:")
+				for _, opt := range cmd.Options {
+					fmt.Printf("  %s\n", opt)
+				}
+			}
+			if len(cmd.Examples) > 0 {
+				fmt.Println("Examples:")
+				for _, ex := range cmd.Examples {
+					fmt.Printf("  %s\n", ex)
+				}
+			}
+			return
+		}
+	}
+	fmt.Printf("No help found for %s %s\n", scope, operation)
+}
+
+// CommandHelp represents the structure of help information for a specific command.
+type CommandHelp struct {
+	Scope     string
+	Operation string
+	ShortDesc string
+	LongDesc  string
+	Syntax    string
+	Arguments []string
+	Options   []string
+	Examples  []string
+}
+
+// commandHelps is a slice of CommandHelp structs containing help information for all commands.
+var commandHelps = []CommandHelp{
+	{
+		Scope:     "user",
+		Operation: "add",
+		ShortDesc: "Add a new user",
+		LongDesc:  "Creates a new user account with the specified username and password.",
+		Syntax:    "user add <username> [password]",
+		Arguments: []string{"username: The name of the new user", "password: (Optional) The password for the new user"},
+		Examples:  []string{"user add john", "user add jane secret_password"},
+	},
+	{
+		Scope:     "user",
+		Operation: "update",
+		ShortDesc: "Update an existing user",
+		LongDesc:  "Updates the username or password of an existing user account.",
+		Syntax:    "user update <username> [new_username] [new_password]",
+		Arguments: []string{"username: The name of the user to update", "new_username: (Optional) The new username", "new_password: (Optional) The new password"},
+		Examples:  []string{"user update john", "user update john johnny", "user update john johnny new_password"},
+	},
+	{
+		Scope:     "user",
+		Operation: "delete",
+		ShortDesc: "Delete a user",
+		LongDesc:  "Deletes an existing user account and all associated mindmaps.",
+		Syntax:    "user delete <username>",
+		Arguments: []string{"username: The name of the user to delete"},
+		Examples:  []string{"user delete john"},
+	},
+	{
+		Scope:     "user",
+		Operation: "select",
+		ShortDesc: "Select a user",
+		LongDesc:  "Selects the specified user account. If no username is provided, deselects the current user.",
+		Syntax:    "user select [username]",
+		Arguments: []string{"username: The name of the user to select"},
+		Examples:  []string{"user select john"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "add",
+		ShortDesc: "Create a new mindmap",
+		LongDesc:  "Creates a new mindmap with the specified name.",
+		Syntax:    "mindmap add <mindmap_name>",
+		Arguments: []string{"mindmap_name: The name of the new mindmap"},
+		Examples:  []string{"mindmap add my_ideas"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "delete",
+		ShortDesc: "Delete a mindmap",
+		LongDesc:  "Deletes the specified mindmap. If no mindmap name is provided deletes the current mindmap and if no mindmap is selected, deletes all mindmaps owned by the current user.",
+		Syntax:    "mindmap delete [mindmap_name]",
+		Arguments: []string{"mindmap_name: (Optional) The name of the mindmap to delete"},
+		Examples:  []string{"mindmap delete", "mindmap delete my_ideas"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "permission",
+		ShortDesc: "Modify mindmap permission",
+		LongDesc:  "Changes or displays the permission of a mindmap to public or private.",
+		Syntax:    "mindmap permission <mindmap_name> [public|private]",
+		Arguments: []string{"mindmap_name: The name of the mindmap", "permission: 'public' or 'private'"},
+		Examples:  []string{"mindmap permission my_mindmap", "mindmap permission my_ideas public", "mindmap permission project_x private"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "import",
+		ShortDesc: "Import a mindmap from a file",
+		LongDesc:  "Imports a mindmap from a file in JSON or XML format.",
+		Syntax:    "mindmap import <filename> [json|xml]",
+		Arguments: []string{"filename: The name of the file to import from", "format: (Optional) The file format, either 'json' or 'xml'. Defaults to 'json'"},
+		Examples:  []string{"mindmap import my_ideas.json", "mindmap import project_x.xml xml"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "export",
+		ShortDesc: "Export a mindmap to a file",
+		LongDesc:  "Exports the current mindmap to a file in JSON or XML format.",
+		Syntax:    "mindmap export <filename> [json|xml]",
+		Arguments: []string{"filename: The name of the file to save to", "format: (Optional) The file format, either 'json' or 'xml'. Defaults to 'json'"},
+		Examples:  []string{"mindmap export my_ideas.json", "mindmap export project_x.xml xml"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "select",
+		ShortDesc: "Select a mindmap",
+		LongDesc:  "Selects the specified mindmap or deselects the current mindmap if no name is provided.",
+		Syntax:    "mindmap select [mindmap_name]",
+		Arguments: []string{"mindmap_name: (Optional) The name of the mindmap to select"},
+		Examples:  []string{"mindmap select", "mindmap select my_ideas"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "list",
+		ShortDesc: "List available mindmaps",
+		LongDesc:  "Displays a list of all mindmaps accessible to the current user.",
+		Syntax:    "mindmap list",
+		Examples:  []string{"mindmap list"},
+	},
+	{
+		Scope:     "mindmap",
+		Operation: "view",
+		ShortDesc: "View mindmap structure",
+		LongDesc:  "Displays the structure of the current mindmap or a specific node.",
+		Syntax:    "mindmap view [index] [--id]",
+		Arguments: []string{"index: (Optional) The index of the node to view", "--id: (Optional) Show node id"},
+		Examples:  []string{"mindmap view", "mindmap view 1.2", "mindmap view --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "add",
+		ShortDesc: "Add a new node",
+		LongDesc:  "Adds a new node to the current mindmap.",
+		Syntax:    "node add <parent> <content> [<extra field label>:<extra field value>]... [--id]",
+		Arguments: []string{"parent: The parent node identifier", "content: The content of the new node", "extra: (Optional) Extra fields in the format label:value", "--id: (Optional) Use id instead of index"},
+		Examples:  []string{"node add 1 \"New idea\"", "node add 2.1 \"Sub-idea\" priority:high --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "update",
+		ShortDesc: "Update a node",
+		LongDesc:  "Updates the content or extra fields of an existing node.",
+		Syntax:    "node update <node> <content> [<extra field label>:<extra field value>]... [--id]",
+		Arguments: []string{"node: The node identifier to modify", "content: The new content for the node", "extra: (Optional) Extra fields to modify in the format label:value", "--id: (Optional) Use id instead of index"},
+		Examples:  []string{"node update 1.1 \"Updated idea\"", "node update 2 \"Changed content\" priority:low --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "move",
+		ShortDesc: "Move a node",
+		LongDesc:  "Moves a node to a new parent in the current mindmap.",
+		Syntax:    "node move <source> <target> [--id]",
+		Arguments: []string{"source: The identifier of the node to move", "target: The identifier of the new parent node", "--id: (Optional) Use id instead of index"},
+		Examples:  []string{"node move 1.2 2.1", "node move 3 1 --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "delete",
+		ShortDesc: "Delete a node",
+		LongDesc:  "Deletes a node and its subtree from the current mindmap.",
+		Syntax:    "node delete <node> [--id]",
+		Arguments: []string{"node: The identifier of the node to delete", "--id: (Optional) Use id instead of index"},
+		Examples:  []string{"node delete 1.2", "node delete 3 --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "find",
+		ShortDesc: "Find nodes",
+		LongDesc:  "Searches for nodes in the current mindmap based on a query string.",
+		Syntax:    "node find <query> [--id]",
+		Arguments: []string{"query: The search query string", "--id: (Optional) Show node id in the results"},
+		Examples:  []string{"node find \"important idea\"", "node find project --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "sort",
+		ShortDesc: "Sort child nodes",
+		LongDesc:  "Sorts the child nodes of a specified node based on content or an extra field.",
+		Syntax:    "node sort [identifier] [field] [--reverse] [--id]",
+		Arguments: []string{"identifier: (Optional) The node whose children to sort. Defaults to root", "field: (Optional) The field to sort by. Defaults to node content", "--reverse: (Optional) Sort in descending order", "--id: (Optional) Use id instead of index"},
+		Examples:  []string{"node sort", "node sort 1.2 priority --reverse", "node sort 2 --id"},
+	},
+	{
+		Scope:     "node",
+		Operation: "undo",
+		ShortDesc: "Undo the last node operation",
+		LongDesc:  "Undoes the last node operation performed in the current mindmap.",
+		Syntax:    "node undo",
+		Examples:  []string{"node undo"},
+	},
+	{
+		Scope:     "node",
+		Operation: "redo",
+		ShortDesc: "Redo the last undone node operation",
+		LongDesc:  "Redoes the last node operation that was undone in the current mindmap.",
+		Syntax:    "node redo",
+		Examples:  []string{"node redo"},
+	},
+	{
+		Scope:     "system",
+		Operation: "exit",
+		ShortDesc: "Exit the program",
+		LongDesc:  "Exits the Mindnoscape program, saving all changes.",
+		Syntax:    "system exit",
+		Examples:  []string{"system exit"},
+	},
+	{
+		Scope:     "system",
+		Operation: "quit",
+		ShortDesc: "Quit the program",
+		LongDesc:  "Quits the Mindnoscape program, saving all changes. Equivalent to 'system exit'.",
+		Syntax:    "system quit",
+		Examples:  []string{"system quit"},
+	},
 }

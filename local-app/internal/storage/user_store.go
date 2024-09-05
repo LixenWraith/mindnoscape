@@ -1,177 +1,136 @@
-// Package storage provides functionality for persisting and retrieving Mindnoscape data.
-// This file implements the storage operations for users using SQLite.
 package storage
 
 import (
-	"database/sql"
 	"fmt"
-	"golang.org/x/crypto/bcrypt"
+	"time"
 
-	"mindnoscape/local-app/internal/models"
+	"mindnoscape/local-app/internal/model"
 )
 
 // UserStore defines the interface for user-related storage operations.
 type UserStore interface {
-	UserAdd(username, hashedPassword string) error
-	UserDelete(username string) error
-	UserExists(username string) (bool, error)
-	UserGet(username string) (*models.User, error)
-	UserUpdate(oldUsername, newUsername, newHashedPassword string) error
-	UserAuthenticate(username, password string) (bool, error)
-	UserCount() (int, error)
+	UserAdd(newUser model.UserInfo) (int, error)
+	UserGet(userInfo model.UserInfo, userFilter model.UserFilter) ([]*model.User, error)
+	UserUpdate(user *model.User, userUpdateInfo model.UserInfo, userFilter model.UserFilter) error
+	UserDelete(user *model.User) error
 }
 
-// SQLiteUserStorage implements the UserStore interface using SQLite.
-type SQLiteUserStorage struct {
-	db *sql.DB
+// UserStorage implements the UserStore interface.
+type UserStorage struct {
+	storage *Storage
 }
 
-// NewSQLiteUserStorage creates a new SQLiteUserStorage instance.
-func NewSQLiteUserStorage(db *sql.DB) *SQLiteUserStorage {
-	return &SQLiteUserStorage{db: db}
+// NewUserStorage creates a new UserStorage instance.
+func NewUserStorage(storage *Storage) *UserStorage {
+	return &UserStorage{storage: storage}
 }
 
 // UserAdd adds a new user to the database.
-func (s *SQLiteUserStorage) UserAdd(username, password string) error {
-	// Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+func (s *UserStorage) UserAdd(newUser model.UserInfo) (int, error) {
+	db := s.storage.GetDatabase()
+	now := time.Now()
+
+	err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to hash password: %w", err)
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer db.Rollback()
+
+	result, err := db.Exec(
+		"INSERT INTO users (username, password_hash, active, created, updated) VALUES (?, ?, ?, ?, ?)",
+		newUser.Username, newUser.PasswordHash, newUser.Active, now, now,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to add user: %w", err)
 	}
 
-	// Insert the new user with hashed password
-	_, err = s.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, hashedPassword)
+	id, err := result.LastInsertId()
 	if err != nil {
-		return fmt.Errorf("failed to add user: %w", err)
+		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
+	}
+
+	if err := db.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return int(id), nil
+}
+
+// UserGet retrieves users based on the provided info and filter.
+func (s *UserStorage) UserGet(userInfo model.UserInfo, userFilter model.UserFilter) ([]*model.User, error) {
+	db := s.storage.GetDatabase()
+	query := "SELECT id, username, password_hash, active, created, updated FROM users WHERE 1=1"
+	var args []interface{}
+
+	if userFilter.ID {
+		query += " AND id = ?"
+		args = append(args, userInfo.ID)
+	}
+	if userFilter.Username {
+		query += " AND username = ?"
+		args = append(args, userInfo.Username)
+	}
+	if userFilter.Active {
+		query += " AND active = ?"
+		args = append(args, userInfo.Active)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*model.User
+	for rows.Next() {
+		var u model.User
+		err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Active, &u.Created, &u.Updated)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user row: %w", err)
+		}
+		users = append(users, &u)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating user rows: %w", err)
+	}
+
+	return users, nil
+}
+
+// UserUpdate updates an existing user in the database.
+func (s *UserStorage) UserUpdate(user *model.User, userUpdateInfo model.UserInfo, userFilter model.UserFilter) error {
+	db := s.storage.GetDatabase()
+	query := "UPDATE users SET updated = ? WHERE id = ?"
+	args := []interface{}{time.Now(), user.ID}
+
+	if userFilter.Username {
+		query += ", username = ?"
+		args = append(args, userUpdateInfo.Username)
+	}
+	if userFilter.PasswordHash {
+		query += ", password_hash = ?"
+		args = append(args, userUpdateInfo.PasswordHash)
+	}
+	if userFilter.Active {
+		query += ", active = ?"
+		args = append(args, userUpdateInfo.Active)
+	}
+
+	_, err := db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
 	}
 
 	return nil
 }
 
-// UserDelete removes a user and all associated data from the database.
-func (s *SQLiteUserStorage) UserDelete(username string) error {
-	// Start a transaction
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Delete user's mindmaps
-	_, err = tx.Exec("DELETE FROM mindmaps WHERE owner = ?", username)
-	if err != nil {
-		return fmt.Errorf("failed to delete user's mindmaps: %w", err)
-	}
-
-	// Delete user
-	_, err = tx.Exec("DELETE FROM users WHERE username = ?", username)
+// UserDelete removes a user from the database.
+func (s *UserStorage) UserDelete(user *model.User) error {
+	db := s.storage.GetDatabase()
+	_, err := db.Exec("DELETE FROM users WHERE id = ?", user.ID)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
 	return nil
-}
-
-// UserExists checks if a user with the given username exists.
-func (s *SQLiteUserStorage) UserExists(username string) (bool, error) {
-	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM users WHERE username = ?", username).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("failed to check user existence: %w", err)
-	}
-	return count > 0, nil
-}
-
-// UserGet retrieves a user by username.
-func (s *SQLiteUserStorage) UserGet(username string) (*models.User, error) {
-	user := &models.User{}
-	err := s.db.QueryRow("SELECT username, password_hash FROM users WHERE username = ?", username).Scan(&user.Username, &user.PasswordHash)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get user: %w", err)
-	}
-	return user, nil
-}
-
-// UserUpdate updates a user's username or password.
-func (s *SQLiteUserStorage) UserUpdate(oldUsername, newUsername, newPassword string) error {
-	// Start a transaction
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// Update username if provided
-	if newUsername != "" && newUsername != oldUsername {
-		_, err = tx.Exec("UPDATE users SET username = ? WHERE username = ?", newUsername, oldUsername)
-		if err != nil {
-			return fmt.Errorf("failed to update username: %w", err)
-		}
-
-		_, err = tx.Exec("UPDATE mindmaps SET owner = ? WHERE owner = ?", newUsername, oldUsername)
-		if err != nil {
-			return fmt.Errorf("failed to update data ownership: %w", err)
-		}
-	}
-
-	// Update password if provided
-	if newPassword != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-		if err != nil {
-			return fmt.Errorf("failed to hash new password: %w", err)
-		}
-
-		_, err = tx.Exec("UPDATE users SET password_hash = ? WHERE username = ?", hashedPassword, oldUsername)
-		if err != nil {
-			return fmt.Errorf("failed to update password: %w", err)
-		}
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
-}
-
-// UserAuthenticate verifies a user's credentials.
-func (s *SQLiteUserStorage) UserAuthenticate(username, password string) (bool, error) {
-	// Retrieve the stored hash
-	var hashedPassword []byte
-	err := s.db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&hashedPassword)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to get user for authentication: %w", err)
-	}
-
-	// Compare the provided password with the stored hash
-	err = bcrypt.CompareHashAndPassword(hashedPassword, []byte(password))
-	if err != nil {
-		if err == bcrypt.ErrMismatchedHashAndPassword {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to compare passwords: %w", err)
-	}
-
-	return true, nil
-}
-
-func (s *SQLiteUserStorage) UserCount() (int, error) {
-	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count users: %w", err)
-	}
-	return count, nil
 }

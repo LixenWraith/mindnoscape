@@ -1,350 +1,246 @@
-// Package storage provides functionality for persisting and retrieving Mindnoscape data.
-// This file implements the storage operations for nodes using SQLite.
 package storage
 
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
-	"mindnoscape/local-app/internal/models"
+	"mindnoscape/local-app/internal/model"
 )
 
 // NodeStore defines the interface for node-related storage operations.
 type NodeStore interface {
-	NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string, id ...int) (int, error)
-	NodeDelete(mindmapName string, username string, id int) error
-	NodeGet(mindmapName string, username string, id int) ([]*models.Node, error)
-	NodeGetAll(mindmapName string, username string) ([]*models.Node, error)
-	NodeUpdate(mindmapName string, username string, id int, content string, extra map[string]string, index string) error
-	NodeMove(mindmapName string, username string, sourceID, targetID int) error
-	NodeOrderUpdate(mindmapName string, username string, nodeID int, index string) error
+	NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo, forceID ...bool) (int, error)
+	NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, nodeFilter model.NodeFilter) ([]*model.Node, error)
+	NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeUpdateInfo model.NodeInfo, nodeUpdateFilter model.NodeFilter) error
+	NodeDelete(mindmap *model.Mindmap, node *model.Node) error
 }
 
-// SQLiteNodeStorage implements the NodeStore interface using SQLite.
-type SQLiteNodeStorage struct {
-	db *sql.DB
+// NodeStorage implements the NodeStore interface.
+type NodeStorage struct {
+	storage *Storage
 }
 
-// NewSQLiteNodeStorage creates a new SQLiteNodeStorage instance.
-func NewSQLiteNodeStorage(db *sql.DB) *SQLiteNodeStorage {
-	return &SQLiteNodeStorage{db: db}
+// NewNodeStorage creates a new NodeStorage instance.
+func NewNodeStorage(storage *Storage) *NodeStorage {
+	return &NodeStorage{storage: storage}
 }
 
 // NodeAdd adds a new node to the database.
-func (ns *SQLiteNodeStorage) NodeAdd(mindmapName string, username string, parentID int, content string, extra map[string]string, index string, id ...int) (int, error) {
+func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo, forceID ...bool) (int, error) {
+	db := s.storage.GetDatabase()
+	now := time.Now()
+
 	// Start a transaction
-	tx, err := ns.db.Begin()
+	err := db.Begin()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer db.Rollback()
 
-	// Get the mindmap ID
-	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get mindmap ID: %w", err)
-	}
-
-	// Insert the node
-	var nodeID int64
-	if len(id) > 0 && id[0] != 0 {
-		// Use the provided ID
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO nodes_%d (id, parent_id, content, node_index) VALUES (?, ?, ?, ?)", mindmapID), id[0], parentID, content, index)
-		nodeID = int64(id[0])
-	} else if parentID == -1 {
-		// This is the root node, explicitly set its ID to 0 and parentID to -1
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO nodes_%d (id, parent_id, content, node_index) VALUES (0, -1, ?, ?)", mindmapID), content, index)
-		nodeID = 0
+	// Insert the node into nodes_{mindmap_id} table
+	var result sql.Result
+	var id int64
+	if len(forceID) > 0 && forceID[0] {
+		// Use the provided ID when forceID is true
+		query := "INSERT INTO nodes_? (id, mindmap_id, parent_id, node_name, index_value, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)"
+		result, err = db.Exec(query, mindmap.ID, newNodeInfo.ID, mindmap.ID, newNodeInfo.ParentID, newNodeInfo.Name, newNodeInfo.Index, now, now)
+		if err != nil {
+			return 0, fmt.Errorf("failed to add node with forced ID: %w", err)
+		}
 	} else {
-		// For non-root nodes, let the database auto-increment the ID
-		result, err := tx.Exec(fmt.Sprintf("INSERT INTO nodes_%d (parent_id, content, node_index) VALUES (?, ?, ?)", mindmapID), parentID, content, index)
+		// Use auto-incrementing ID
+		query := "INSERT INTO nodes_? (mindmap_id, parent_id, node_name, index_value, created, updated) VALUES (?, ?, ?, ?, ?, ?)"
+		result, err = db.Exec(query, mindmap.ID, mindmap.ID, newNodeInfo.ParentID, newNodeInfo.Name, newNodeInfo.Index, now, now)
 		if err != nil {
-			return 0, fmt.Errorf("failed to insert node: %w", err)
-		}
-		nodeID, err = result.LastInsertId()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get last insert ID: %w", err)
+			return 0, fmt.Errorf("failed to add node: %w", err)
 		}
 	}
-
+	id, err = result.LastInsertId()
 	if err != nil {
-		return 0, fmt.Errorf("failed to insert node: %w", err)
+		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
-	// Insert extra attributes
-	for key, value := range extra {
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO node_attributes_%d (node_id, key, value) VALUES (?, ?, ?)", mindmapID), nodeID, key, value)
-		if err != nil {
-			return 0, fmt.Errorf("failed to insert node attribute: %w", err)
+	// Insert content into node_content_{mindmap_id} table
+	if len(newNodeInfo.Content) > 0 {
+		contentQuery := "INSERT INTO node_content_? (node_id, key, value) VALUES (?, ?, ?)"
+		for key, value := range newNodeInfo.Content {
+			_, err = db.Exec(contentQuery, mindmap.ID, id, key, value)
+			if err != nil {
+				return 0, fmt.Errorf("failed to add node content: %w", err)
+				db.Rollback()
+			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return int(nodeID), nil
-}
-
-// NodeDelete removes a node from the database.
-func (ns *SQLiteNodeStorage) NodeDelete(mindmapName string, username string, id int) error {
-	// Start a transaction
-	tx, err := ns.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Get mindmap ID
-	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
-	if err != nil {
-		return fmt.Errorf("failed to get mindmap ID: %w", err)
-	}
-
-	// Check if the node exists
-	var count int
-	err = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM nodes_%d WHERE id = ?", mindmapID), id).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check node existence: %w", err)
-	}
-	if count == 0 {
-		return fmt.Errorf("node with id %d does not exist", id)
-	}
-
-	// Delete node attributes
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM node_attributes_%d WHERE node_id = ?", mindmapID), id)
-	if err != nil {
-		return fmt.Errorf("failed to delete node attributes: %w", err)
-	}
-
-	// Delete the node
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM nodes_%d WHERE id = ?", mindmapID), id)
-	if err != nil {
-		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
 	// Commit the transaction
-	return tx.Commit()
+	if err := db.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return int(id), nil
 }
 
-// NodeGet retrieves a specific node from the database.
-func (ns *SQLiteNodeStorage) NodeGet(mindmapName string, username string, id int) ([]*models.Node, error) {
-	// Get mindmap ID
-	var mindmapID int
-	err := ns.db.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mindmap ID: %w", err)
+// NodeGet retrieves nodes based on the provided info and filter.
+func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, nodeFilter model.NodeFilter) ([]*model.Node, error) {
+	db := s.storage.GetDatabase()
+	query := "SELECT id, parent_id, node_name, index_value, created, updated FROM nodes_? WHERE 1=1"
+	var args []interface{}
+
+	args = append(args, mindmap.ID)
+	if nodeFilter.ID {
+		query += " AND id = ?"
+		args = append(args, nodeInfo.ID)
+	}
+	if nodeFilter.ParentID {
+		query += " AND parent_id = ?"
+		args = append(args, nodeInfo.ParentID)
+	}
+	if nodeFilter.Name {
+		query += " AND node_name = ?"
+		args = append(args, nodeInfo.Name)
+	}
+	if nodeFilter.Index {
+		query += " AND index_value = ?"
+		args = append(args, nodeInfo.Index)
 	}
 
-	// Get the node
-	var node models.Node
-	err = ns.db.QueryRow(fmt.Sprintf("SELECT id, COALESCE(parent_id, -1), content, node_index FROM nodes_%d WHERE id = ?", mindmapID), id).Scan(&node.ID, &node.ParentID, &node.Content, &node.Index)
+	rows, err := db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get node: %w", err)
-	}
-
-	// Get node attributes
-	rows, err := ns.db.Query(fmt.Sprintf("SELECT key, value FROM node_attributes_%d WHERE node_id = ?", mindmapID), id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node attributes: %w", err)
+		return nil, fmt.Errorf("failed to query nodes: %w", err)
 	}
 	defer rows.Close()
 
-	// Scan attributes into the node's Extra map
-	node.Extra = make(map[string]string)
+	var nodes []*model.Node
 	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			return nil, fmt.Errorf("failed to scan node attribute: %w", err)
-		}
-		node.Extra[key] = value
-	}
-
-	return []*models.Node{&node}, nil
-}
-
-// NodeGetAll retrieves all nodes for a given mindmap.
-func (ns *SQLiteNodeStorage) NodeGetAll(mindmapName string, username string) ([]*models.Node, error) {
-	// Get mindmap ID and check permissions
-	var mindmapID int
-	var isPublic bool
-	var owner string
-	err := ns.db.QueryRow("SELECT id, is_public, owner FROM mindmaps WHERE name = ?", mindmapName).Scan(&mindmapID, &isPublic, &owner)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mindmap info: %w", err)
-	}
-
-	// Check if the user has permission to access the mindmap
-	if !isPublic && owner != username {
-		return nil, fmt.Errorf("user %s does not have permission to access mindmap '%s'", username, mindmapName)
-	}
-
-	// Get all nodes for the mindmap
-	rows, err := ns.db.Query(fmt.Sprintf("SELECT id, COALESCE(parent_id, -1), content, node_index FROM nodes_%d", mindmapID))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nodes: %w", err)
-	}
-	defer rows.Close()
-
-	// Scan nodes into a slice
-	var nodes []*models.Node
-	for rows.Next() {
-		var node models.Node
-		if err := rows.Scan(&node.ID, &node.ParentID, &node.Content, &node.Index); err != nil {
-			return nil, fmt.Errorf("failed to scan node: %w", err)
-		}
-		node.Extra = make(map[string]string)
-		nodes = append(nodes, &node)
-	}
-
-	// Get attributes for all nodes
-	for _, node := range nodes {
-		attrRows, err := ns.db.Query(fmt.Sprintf("SELECT key, value FROM node_attributes_%d WHERE node_id = ?", mindmapID), node.ID)
+		var n model.Node
+		err := rows.Scan(&n.ID, &n.ParentID, &n.Name, &n.Index, &n.Created, &n.Updated)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get node attributes: %w", err)
+			return nil, fmt.Errorf("failed to scan node row: %w", err)
 		}
-		for attrRows.Next() {
+		n.MindmapID = mindmap.ID
+		n.Content = make(map[string]string)
+		nodes = append(nodes, &n)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating node rows: %w", err)
+	}
+
+	// Fetch content for each node
+	for _, node := range nodes {
+		contentQuery := "SELECT key, value FROM node_content_? WHERE node_id = ?"
+		contentRows, err := db.Query(contentQuery, mindmap.ID, node.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query node content: %w", err)
+		}
+		defer contentRows.Close()
+
+		for contentRows.Next() {
 			var key, value string
-			if err := attrRows.Scan(&key, &value); err != nil {
-				attrRows.Close()
-				return nil, fmt.Errorf("failed to scan node attribute: %w", err)
+			if err := contentRows.Scan(&key, &value); err != nil {
+				return nil, fmt.Errorf("failed to scan content row: %w", err)
 			}
-			node.Extra[key] = value
+			node.Content[key] = value
 		}
-		attrRows.Close()
+
+		if err := contentRows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating content rows: %w", err)
+		}
 	}
 
 	return nodes, nil
 }
 
 // NodeUpdate updates an existing node in the database.
-func (ns *SQLiteNodeStorage) NodeUpdate(mindmapName string, username string, id int, content string, extra map[string]string, index string) error {
-	// Start a transaction
-	tx, err := ns.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeUpdateInfo model.NodeInfo, nodeUpdateFilter model.NodeFilter) error {
+	db := s.storage.GetDatabase()
 
-	// Get mindmap ID
-	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
-	if err != nil {
-		return fmt.Errorf("failed to get mindmap ID: %w", err)
+	var err error
+	if err = db.Begin(); err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer db.Rollback()
 
-	// Check if the node exists
-	var count int
-	err = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM nodes_%d WHERE id = ?", mindmapID), id).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check node existence: %w", err)
-	}
-	if count == 0 {
-		return fmt.Errorf("node with id %d does not exist", id)
-	}
+	var updates []string
+	var args []interface{}
 
-	// Update node
-	_, err = tx.Exec(fmt.Sprintf("UPDATE nodes_%d SET content = ?, node_index = ? WHERE id = ?", mindmapID), content, index, id)
-	if err != nil {
-		return fmt.Errorf("failed to update node: %w", err)
+	if nodeUpdateFilter.Name {
+		updates = append(updates, "node_name = ?")
+		args = append(args, nodeUpdateInfo.Name)
+	}
+	if nodeUpdateFilter.ParentID {
+		updates = append(updates, "parent_id = ?")
+		args = append(args, nodeUpdateInfo.ParentID)
+	}
+	if nodeUpdateFilter.Index {
+		updates = append(updates, "index_value = ?")
+		args = append(args, nodeUpdateInfo.Index)
 	}
 
-	// Delete existing attributes
-	_, err = tx.Exec(fmt.Sprintf("DELETE FROM node_attributes_%d WHERE node_id = ?", mindmapID), id)
-	if err != nil {
-		return fmt.Errorf("failed to delete existing node attributes: %w", err)
-	}
+	if len(updates) > 0 {
+		updates = append(updates, "updated = ?")
+		args = append(args, time.Now())
 
-	// Insert new attributes
-	for key, value := range extra {
-		_, err = tx.Exec(fmt.Sprintf("INSERT INTO node_attributes_%d (node_id, key, value) VALUES (?, ?, ?)", mindmapID), id, key, value)
+		// Use a prepared statement with a placeholder for the table name
+		query := "UPDATE nodes_? SET " + strings.Join(updates, ", ") + " WHERE id = ?"
+		args = append([]interface{}{mindmap.ID}, args...)
+		args = append(args, node.ID)
+
+		_, err = db.Exec(query, args...)
 		if err != nil {
-			return fmt.Errorf("failed to insert node attribute: %w", err)
+			return fmt.Errorf("failed to update node: %w", err)
 		}
 	}
 
-	// Commit the transaction
-	return tx.Commit()
+	if nodeUpdateFilter.Content {
+		// Delete existing content
+		deleteQuery := "DELETE FROM node_content_? WHERE node_id = ?"
+		_, err = db.Exec(deleteQuery, mindmap.ID, node.ID)
+		if err != nil {
+			return fmt.Errorf("failed to delete existing node content: %w", err)
+		}
+
+		// Insert new content
+		if len(nodeUpdateInfo.Content) > 0 {
+			insertQuery := "INSERT INTO node_content_? (node_id, key, value) VALUES (?, ?, ?)"
+			for key, value := range nodeUpdateInfo.Content {
+				_, err = db.Exec(insertQuery, mindmap.ID, node.ID, key, value)
+				if err != nil {
+					return fmt.Errorf("failed to insert new node content: %w", err)
+				}
+			}
+		}
+	}
+
+	return db.Commit()
 }
 
-// NodeMove changes the parent of a node in the database.
-func (ns *SQLiteNodeStorage) NodeMove(mindmapName string, username string, sourceID, targetID int) error {
-	// Start a transaction
-	tx, err := ns.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// NodeDelete removes a node from the database.
+func (s *NodeStorage) NodeDelete(mindmap *model.Mindmap, node *model.Node) error {
+	db := s.storage.GetDatabase()
 
-	// Get mindmap ID
-	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
-	if err != nil {
-		return fmt.Errorf("failed to get mindmap ID: %w", err)
-	}
-
-	// Check if source and target nodes exist
-	var sourceCount, targetCount int
-	err = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM nodes_%d WHERE id = ?", mindmapID), sourceID).Scan(&sourceCount)
-	if err != nil {
-		return fmt.Errorf("failed to check source node: %w", err)
-	}
-	if sourceCount == 0 {
-		return fmt.Errorf("source node not found")
-	}
-	err = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM nodes_%d WHERE id = ?", mindmapID), targetID).Scan(&targetCount)
-	if err != nil {
-		return fmt.Errorf("failed to check target node: %w", err)
-	}
-	if targetCount == 0 {
-		return fmt.Errorf("target node not found")
-	}
-
-	// Update the parent ID of the source node
-	_, err = tx.Exec(fmt.Sprintf("UPDATE nodes_%d SET parent_id = ? WHERE id = ?", mindmapID), targetID, sourceID)
-	if err != nil {
-		return fmt.Errorf("failed to update node parent: %w", err)
-	}
-
-	// Commit the transaction
-	return tx.Commit()
-}
-
-func (ns *SQLiteNodeStorage) NodeOrderUpdate(mindmapName string, username string, nodeID int, index string) error {
-	// Start a transaction
-	tx, err := ns.db.Begin()
-	if err != nil {
+	if err := db.Begin(); err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer db.Rollback()
 
-	// Get mindmap ID
-	var mindmapID int
-	err = tx.QueryRow("SELECT id FROM mindmaps WHERE name = ? AND owner = ?", mindmapName, username).Scan(&mindmapID)
+	// Delete node content
+	contentQuery := "DELETE FROM node_content_? WHERE node_id = ?"
+	_, err := db.Exec(contentQuery, mindmap.ID, node.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get mindmap ID: %w", err)
+		return fmt.Errorf("failed to delete node content: %w", err)
 	}
 
-	// Check if the node exists
-	var count int
-	err = tx.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM nodes_%d WHERE id = ?", mindmapID), nodeID).Scan(&count)
+	// Delete node
+	nodeQuery := "DELETE FROM nodes_? WHERE id = ?"
+	_, err = db.Exec(nodeQuery, mindmap.ID, node.ID)
 	if err != nil {
-		return fmt.Errorf("failed to check node existence: %w", err)
-	}
-	if count == 0 {
-		return fmt.Errorf("node with id %d does not exist", nodeID)
+		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
-	// Update node index
-	_, err = tx.Exec(fmt.Sprintf("UPDATE nodes_%d SET node_index = ? WHERE id = ?", mindmapID), index, nodeID)
-	if err != nil {
-		return fmt.Errorf("failed to update node order: %w", err)
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
+	if err := db.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

@@ -5,7 +5,9 @@ package data
 import (
 	"fmt"
 
-	"mindnoscape/local-app/internal/config"
+	"mindnoscape/local-app/internal/event"
+	"mindnoscape/local-app/internal/log"
+	"mindnoscape/local-app/internal/model"
 	"mindnoscape/local-app/internal/storage"
 )
 
@@ -14,48 +16,210 @@ type Manager struct {
 	UserManager    *UserManager
 	MindmapManager *MindmapManager
 	NodeManager    *NodeManager
-	HistoryManager *HistoryManager
+	EventManager   *event.EventManager
+	Config         *model.Config
+	Logger         *log.Logger
+}
 
-	Config *config.Config
+// DataOperations defines the interface for mindmap-related operations
+type DataOperations interface {
+	// todo: add user/subtree export functionalities and generalize
+	MindmapExport(filename, format string) error
+	MindmapImport(filename, format string) (*model.Mindmap, error)
 }
 
 // NewManager creates a new Manager instance
-func NewManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *config.Config) (*Manager, error) {
+func NewManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *model.Config, logger *log.Logger) (*Manager, error) {
+	eventManager := event.NewEventManager()
 	m := &Manager{
-		Config: cfg,
-	}
-
-	// Initialize MindmapManager
-	var err error
-	m.MindmapManager, err = NewMindmapManager(mindmapStore, nodeStore, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create MindmapManager: %w", err)
+		EventManager: eventManager,
+		Config:       cfg,
+		Logger:       logger,
 	}
 
 	// Initialize UserManager
-	// TODO: UserManger dependence on MindmapManager is due to the old program structure, interface and logic to be updated
-	m.UserManager, err = NewUserManager(userStore, cfg, m.MindmapManager)
+	var err error
+	m.UserManager, err = NewUserManager(userStore, eventManager, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UserManager: %w", err)
 	}
 
-	// Initialize NodeManager and HistoryManager
-	m.NodeManager = NewNodeManager(m.MindmapManager)
-	m.HistoryManager = NewHistoryManager(m.NodeManager)
+	// Initialize MindmapManager
+	m.MindmapManager, err = NewMindmapManager(mindmapStore, eventManager, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MindmapManager: %w", err)
+	}
+
+	// Initialize NodeManager
+	m.NodeManager, err = NewNodeManager(nodeStore, eventManager, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create NodeManager: %w", err)
+	}
 
 	// Handle default user logic
 	if cfg.DefaultUserActive {
-		exists, err := m.UserManager.UserExists(cfg.DefaultUser)
+		defaultUserInfo := model.UserInfo{Username: cfg.DefaultUser}
+		exists, err := m.UserManager.UserGet(defaultUserInfo, model.UserFilter{Username: true})
 		if err != nil {
 			return nil, fmt.Errorf("failed to check default user existence: %w", err)
 		}
-		if !exists {
-			err = m.UserManager.UserAdd(cfg.DefaultUser, cfg.DefaultUserPassword)
+		if len(exists) == 0 {
+			defaultUserInfo.PasswordHash = []byte(cfg.DefaultUserPassword)
+			_, err = m.UserManager.UserAdd(defaultUserInfo)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create default user: %w", err)
 			}
 		}
 	}
 
+	// Subscribe MindmapManager to UserDeleted events
+	eventManager.Subscribe(event.UserDeleted, m.MindmapManager.handleUserDeleted)
+
+	// Subscribe NodeManager to MindmapCreated events
+	eventManager.Subscribe(event.MindmapAdded, m.NodeManager.handleMindmapAdded)
+
+	// Subscribe to MindmapDeleted events
+	eventManager.Subscribe(event.MindmapDeleted, m.NodeManager.handleMindmapDeleted)
+
+	// Subscribe to MindmapUpdated events
+	eventManager.Subscribe(event.MindmapUpdated, m.NodeManager.handleMindmapUpdated)
+
+	// Subscribe to MindmapSelected events
+	eventManager.Subscribe(event.MindmapSelected, m.NodeManager.handleMindmapSelected)
+
 	return m, nil
+}
+
+// MindmapExport exports a mindmap to a file in the specified format.
+func (m *Manager) MindmapExport(user *model.User, mindmap *model.Mindmap, filename, format string) error {
+	err := storage.FileExport(mindmap, filename, format)
+	if err != nil {
+		return fmt.Errorf("failed to export mindmap: %w", err)
+	}
+
+	return nil
+}
+
+// MindmapImport imports a mindmap from a file in the specified format.
+func (m *Manager) MindmapImport(user *model.User, filename, format string) (*model.Mindmap, error) {
+	// Import the mindmap
+	importedMindmap, err := storage.FileImport(filename, format)
+	if err != nil {
+		return nil, fmt.Errorf("failed to import mindmap: %w", err)
+	}
+
+	// Validate the imported mindmap structure
+	if err := m.validateMindmap(importedMindmap); err != nil {
+		return nil, fmt.Errorf("invalid mindmap structure: %w", err)
+	}
+
+	// Check if a mindmap with the same name exists for the user
+	existingMindmaps, err := m.MindmapManager.MindmapGet(user, model.MindmapInfo{Name: importedMindmap.Name}, model.MindmapFilter{Name: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing mindmap: %w", err)
+	}
+
+	if len(existingMindmaps) > 0 {
+		// Delete existing mindmap
+		err = m.MindmapManager.MindmapDelete(user, existingMindmaps[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete existing mindmap: %w", err)
+		}
+	}
+
+	// Add the new mindmap
+	importedMindmap.Owner = user.Username
+	newMindmapID, err := m.MindmapManager.MindmapAdd(user, model.MindmapInfo{
+		Name:     importedMindmap.Name,
+		IsPublic: importedMindmap.IsPublic,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to add imported mindmap: %w", err)
+	}
+	importedMindmap.ID = newMindmapID
+
+	// Add nodes
+	for _, node := range importedMindmap.Nodes {
+		_, _, err := m.NodeManager.NodeAdd(importedMindmap, m.NodeManager.NodeToInfo(node), true)
+		if err != nil {
+			// Rollback: delete the newly added mindmap
+			m.MindmapManager.MindmapDelete(user, importedMindmap)
+			return nil, fmt.Errorf("failed to add node: %w", err)
+		}
+	}
+
+	return importedMindmap, nil
+}
+
+// validateMindmap checks the imported mindmap structure for validity.
+func (mm *Manager) validateMindmap(mindmap *model.Mindmap) error {
+	// Check root node
+	if mindmap.Root == nil || mindmap.Root.ID != 0 || mindmap.Root.ParentID != -1 || mindmap.Root.Index != "0" {
+		return fmt.Errorf("invalid root node structure")
+	}
+
+	nodeIDs := make(map[int]bool)
+	nodeIDs[0] = true // Root node
+
+	// First pass: Check for duplicate IDs
+	var checkDuplicateIDs func(*model.Node) error
+	checkDuplicateIDs = func(node *model.Node) error {
+		if node.ID != 0 {
+			if nodeIDs[node.ID] {
+				return fmt.Errorf("duplicate node ID: %d", node.ID)
+			}
+			nodeIDs[node.ID] = true
+		}
+		for _, child := range node.Children {
+			if err := checkDuplicateIDs(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := checkDuplicateIDs(mindmap.Root); err != nil {
+		return err
+	}
+
+	// Second pass: Validate parent IDs
+	var validateParentIDs func(*model.Node) error
+	validateParentIDs = func(node *model.Node) error {
+		if node.ID != 0 {
+			if !nodeIDs[node.ParentID] {
+				return fmt.Errorf("invalid parent ID for node %d: parent %d not found", node.ID, node.ParentID)
+			}
+		}
+		for _, child := range node.Children {
+			if err := validateParentIDs(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return validateParentIDs(mindmap.Root)
+}
+
+func buildTreeFromNodes(nodes []*model.Node) *model.Node {
+	nodeMap := make(map[int]*model.Node)
+	var root *model.Node
+
+	// First pass: build the map
+	for _, node := range nodes {
+		nodeMap[node.ID] = node
+		if node.ParentID == -1 {
+			root = node
+		}
+	}
+
+	// Second pass: build the tree
+	for _, node := range nodes {
+		if node.ParentID != -1 {
+			parent := nodeMap[node.ParentID]
+			if parent != nil {
+				parent.Children = append(parent.Children, node)
+			}
+		}
+	}
+
+	return root
 }

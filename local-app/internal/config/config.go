@@ -7,23 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-)
 
-// Config represents the configuration settings for the application.
-type Config struct {
-	DatabaseDir         string `json:"database_dir"`
-	DatabaseFile        string `json:"database_file"`
-	LogFolder           string `json:"log_folder"`
-	CommandLog          string `json:"command_log"`
-	ErrorLog            string `json:"error_log"`
-	DefaultUser         string `json:"default_user"`
-	DefaultUserActive   bool   `json:"default_user_active"`
-	DefaultUserPassword string `json:"default_user_password"`
-}
+	"mindnoscape/local-app/internal/model"
+)
 
 // Global variables to store the current configuration and its file path.
 var (
-	currentConfig *Config
+	currentConfig *model.Config
 	configPath    = "./data/config.json"
 )
 
@@ -38,14 +28,16 @@ func ConfigLoad() error {
 
 	// Check if the config file exists, if not create a default one
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		defaultConfig := &Config{
-			DatabaseDir:       "./data",
-			DatabaseFile:      "mindnoscape.db",
-			LogFolder:         "./log",
-			CommandLog:        "commands.log",
-			ErrorLog:          "errors.log",
-			DefaultUser:       "a",
-			DefaultUserActive: true,
+		defaultConfig := &model.Config{
+			DatabaseDir:         "./data",
+			DatabaseFile:        "mindnoscape.db",
+			DatabaseType:        "sqlite",
+			LogFolder:           "./log",
+			CommandLog:          "commands.log",
+			ErrorLog:            "errors.log",
+			DefaultUser:         "a",
+			DefaultUserActive:   true,
+			DefaultUserPassword: "",
 		}
 		if err := ConfigSave(defaultConfig); err != nil {
 			return fmt.Errorf("failed to create default config: %v", err)
@@ -61,16 +53,24 @@ func ConfigLoad() error {
 	}
 
 	// Unmarshal the config from JSON
-	currentConfig = &Config{}
+	currentConfig = &model.Config{}
 	if err := json.Unmarshal(file, currentConfig); err != nil {
 		return fmt.Errorf("error parsing config file: %v", err)
+	}
+
+	// Set default database type if not specified
+	if currentConfig.DatabaseType == "" {
+		currentConfig.DatabaseType = "sqlite"
+		if err := ConfigSave(currentConfig); err != nil {
+			return fmt.Errorf("failed to save updated config: %v", err)
+		}
 	}
 
 	return nil
 }
 
 // ConfigSave saves the provided configuration to the JSON file.
-func ConfigSave(cfg *Config) error {
+func ConfigSave(cfg *model.Config) error {
 	// Marshal the config to JSON
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -86,6 +86,6 @@ func ConfigSave(cfg *Config) error {
 }
 
 // ConfigGet returns the current configuration.
-func ConfigGet() *Config {
+func ConfigGet() *model.Config {
 	return currentConfig
 }
