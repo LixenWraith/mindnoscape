@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"mindnoscape/local-app/internal/data"
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/data"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // CommandHandler is a function type for command handlers

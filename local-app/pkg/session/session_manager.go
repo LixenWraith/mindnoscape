@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"mindnoscape/local-app/internal/data"
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/data"
+	"mindnoscape/local-app/pkg/model"
 )
 
 const (

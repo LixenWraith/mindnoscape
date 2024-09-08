@@ -8,14 +8,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"mindnoscape/local-app/internal/adapter"
-	"mindnoscape/local-app/internal/cli"
-	"mindnoscape/local-app/internal/config"
-	"mindnoscape/local-app/internal/data"
-	"mindnoscape/local-app/internal/log"
-	//"mindnoscape/local-app/internal/model"
-	"mindnoscape/local-app/internal/session"
-	"mindnoscape/local-app/internal/storage"
+	"mindnoscape/local-app/pkg/adapter"
+	"mindnoscape/local-app/pkg/cli"
+	"mindnoscape/local-app/pkg/config"
+	"mindnoscape/local-app/pkg/data"
+	"mindnoscape/local-app/pkg/log"
+	"mindnoscape/local-app/pkg/session"
+	"mindnoscape/local-app/pkg/storage"
 )
 
 // main is the entry point of the application. It initializes all components,
@@ -72,7 +71,7 @@ func main() {
 	fmt.Println("DEBUG: Storage initialized.")
 
 	// Initialize data manager
-	dataManager, err := data.NewManager(store.UserStore, store.MindmapStore, store.NodeStore, cfg, logger)
+	dataManager, err := data.NewDataManager(store.UserStore, store.MindmapStore, store.NodeStore, cfg, logger)
 	if err != nil {
 		_ = logger.LogError(fmt.Errorf("failed to inialize data manager: %w", err))
 		os.Exit(1)

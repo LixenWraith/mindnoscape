@@ -5,10 +5,10 @@ package data
 import (
 	"fmt"
 
-	"mindnoscape/local-app/internal/event"
-	"mindnoscape/local-app/internal/log"
-	"mindnoscape/local-app/internal/model"
-	"mindnoscape/local-app/internal/storage"
+	"mindnoscape/local-app/pkg/event"
+	"mindnoscape/local-app/pkg/log"
+	"mindnoscape/local-app/pkg/model"
+	"mindnoscape/local-app/pkg/storage"
 )
 
 // MindmapOperations defines the interface for mindmap-related operations

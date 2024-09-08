@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // UserStore defines the interface for user-related storage operations.

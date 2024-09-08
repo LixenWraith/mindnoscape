@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"mindnoscape/local-app/internal/model"
-	"mindnoscape/local-app/internal/session"
+	"mindnoscape/local-app/pkg/model"
+	"mindnoscape/local-app/pkg/session"
 )
 
 // AdapterInstance represents an instance of an adapter

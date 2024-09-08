@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"mindnoscape/local-app/internal/event"
-	"mindnoscape/local-app/internal/log"
-	"mindnoscape/local-app/internal/model"
-	"mindnoscape/local-app/internal/storage"
+	"mindnoscape/local-app/pkg/event"
+	"mindnoscape/local-app/pkg/log"
+	"mindnoscape/local-app/pkg/model"
+	"mindnoscape/local-app/pkg/storage"
 )
 
 // NodeOperations defines the interface for node-related operations

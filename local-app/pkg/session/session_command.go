@@ -3,7 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // SessionCommand wraps the model.Command and adds session-specific functionality

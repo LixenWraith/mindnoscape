@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // Storage represents the main storage implementation.

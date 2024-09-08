@@ -3,10 +3,10 @@ package session
 import (
 	"errors"
 	"fmt"
-	"mindnoscape/local-app/internal/event"
+	"mindnoscape/local-app/pkg/event"
 	"strings"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // handleMindmapAdd handles the mindmap add command

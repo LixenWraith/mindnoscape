@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // Global variables to store the current configuration and its file path.

@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"mindnoscape/local-app/internal/adapter"
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/adapter"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // CLI represents the command-line interface

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // NodeStore defines the interface for node-related storage operations.
@@ -68,8 +68,8 @@ func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo
 		for key, value := range newNodeInfo.Content {
 			_, err = db.Exec(contentQuery, mindmap.ID, id, key, value)
 			if err != nil {
-				return 0, fmt.Errorf("failed to add node content: %w", err)
 				db.Rollback()
+				return 0, fmt.Errorf("failed to add node content: %w", err)
 			}
 		}
 	}

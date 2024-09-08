@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {

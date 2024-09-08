@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // MindmapStore defines the interface for mindmap-related storage operations.
@@ -45,7 +45,7 @@ func (s *MindmapStorage) MindmapAdd(user *model.User, newMindmap model.MindmapIn
 	}
 	defer func() {
 		if err != nil {
-			db.Rollback()
+			_ = db.Rollback()
 		}
 	}()
 
@@ -160,7 +160,9 @@ func (s *MindmapStorage) MindmapDelete(mindmap *model.Mindmap) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer db.Rollback()
+	defer func(db Database) {
+		_ = db.Rollback()
+	}(db)
 
 	// Drop the mindmap tables
 	err = db.DropMindmapTables(mindmap.ID)

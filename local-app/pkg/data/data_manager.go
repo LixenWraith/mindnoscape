@@ -5,14 +5,14 @@ package data
 import (
 	"fmt"
 
-	"mindnoscape/local-app/internal/event"
-	"mindnoscape/local-app/internal/log"
-	"mindnoscape/local-app/internal/model"
-	"mindnoscape/local-app/internal/storage"
+	"mindnoscape/local-app/pkg/event"
+	"mindnoscape/local-app/pkg/log"
+	"mindnoscape/local-app/pkg/model"
+	"mindnoscape/local-app/pkg/storage"
 )
 
-// Manager is the main struct that coordinates all data operations
-type Manager struct {
+// DataManager is the main struct that coordinates all data operations
+type DataManager struct {
 	UserManager    *UserManager
 	MindmapManager *MindmapManager
 	NodeManager    *NodeManager
@@ -28,10 +28,10 @@ type DataOperations interface {
 	MindmapImport(filename, format string) (*model.Mindmap, error)
 }
 
-// NewManager creates a new Manager instance
-func NewManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *model.Config, logger *log.Logger) (*Manager, error) {
+// NewDataManager creates a new Manager instance
+func NewDataManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *model.Config, logger *log.Logger) (*DataManager, error) {
 	eventManager := event.NewEventManager()
-	m := &Manager{
+	m := &DataManager{
 		EventManager: eventManager,
 		Config:       cfg,
 		Logger:       logger,
@@ -91,7 +91,7 @@ func NewManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, 
 }
 
 // MindmapExport exports a mindmap to a file in the specified format.
-func (m *Manager) MindmapExport(user *model.User, mindmap *model.Mindmap, filename, format string) error {
+func (m *DataManager) MindmapExport(user *model.User, mindmap *model.Mindmap, filename, format string) error {
 	err := storage.FileExport(mindmap, filename, format)
 	if err != nil {
 		return fmt.Errorf("failed to export mindmap: %w", err)
@@ -101,7 +101,7 @@ func (m *Manager) MindmapExport(user *model.User, mindmap *model.Mindmap, filena
 }
 
 // MindmapImport imports a mindmap from a file in the specified format.
-func (m *Manager) MindmapImport(user *model.User, filename, format string) (*model.Mindmap, error) {
+func (m *DataManager) MindmapImport(user *model.User, filename, format string) (*model.Mindmap, error) {
 	// Import the mindmap
 	importedMindmap, err := storage.FileImport(filename, format)
 	if err != nil {
@@ -152,7 +152,7 @@ func (m *Manager) MindmapImport(user *model.User, filename, format string) (*mod
 }
 
 // validateMindmap checks the imported mindmap structure for validity.
-func (mm *Manager) validateMindmap(mindmap *model.Mindmap) error {
+func (mm *DataManager) validateMindmap(mindmap *model.Mindmap) error {
 	// Check root node
 	if mindmap.Root == nil || mindmap.Root.ID != 0 || mindmap.Root.ParentID != -1 || mindmap.Root.Index != "0" {
 		return fmt.Errorf("invalid root node structure")

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"mindnoscape/local-app/internal/model"
+	"mindnoscape/local-app/pkg/model"
 )
 
 // handleUserAdd handles the user add command
