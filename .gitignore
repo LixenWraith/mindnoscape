@@ -1,2 +1,6 @@
-/local-app/.idea
+dev/
+local-app/.idea
+local-app/log
+local-app/data
+
 
