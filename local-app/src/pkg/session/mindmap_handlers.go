@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"mindnoscape/local-app/src/pkg/event"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 	"strings"
 )
 
 // handleMindmapAdd handles the mindmap add command
-func handleMindmapAdd(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapAdd(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) != 1 {
 		return nil, errors.New("mindmap add command requires exactly 1 argument: <mindmap_name>")
 	}
@@ -19,7 +19,7 @@ func handleMindmapAdd(s *Session, cmd model2.Command) (interface{}, error) {
 		return nil, fmt.Errorf("no user selected: %w", err)
 	}
 
-	mindmapInfo := model2.MindmapInfo{
+	mindmapInfo := model.MindmapInfo{
 		Name: cmd.Args[0],
 	}
 
@@ -29,7 +29,7 @@ func handleMindmapAdd(s *Session, cmd model2.Command) (interface{}, error) {
 	}
 
 	// Fetch the newly created mindmap and set it as the current mindmap
-	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model2.MindmapInfo{ID: mindmapID}, model2.MindmapFilter{ID: true})
+	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model.MindmapInfo{ID: mindmapID}, model.MindmapFilter{ID: true})
 	if err != nil || len(mindmaps) == 0 {
 		return nil, fmt.Errorf("failed to retrieve newly created mindmap: %w", err)
 	}
@@ -39,7 +39,7 @@ func handleMindmapAdd(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapDelete handles the mindmap delete command
-func handleMindmapDelete(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapDelete(s *Session, cmd model.Command) (interface{}, error) {
 	user, err := s.UserGet()
 	if err != nil {
 		return nil, fmt.Errorf("no user selected: %w", err)
@@ -61,7 +61,7 @@ func handleMindmapDelete(s *Session, cmd model2.Command) (interface{}, error) {
 
 	// Delete specific mindmap
 	mindmapName := cmd.Args[0]
-	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model2.MindmapInfo{Name: mindmapName}, model2.MindmapFilter{Name: true})
+	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model.MindmapInfo{Name: mindmapName}, model.MindmapFilter{Name: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mindmap: %w", err)
 	}
@@ -84,7 +84,7 @@ func handleMindmapDelete(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapPermission handles the mindmap permission command
-func handleMindmapPermission(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapPermission(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("mindmap permission command requires 1 or 2 arguments: <mindmap_name> [public|private]")
 	}
@@ -95,7 +95,7 @@ func handleMindmapPermission(s *Session, cmd model2.Command) (interface{}, error
 	}
 
 	mindmapName := cmd.Args[0]
-	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model2.MindmapInfo{Name: mindmapName}, model2.MindmapFilter{Name: true})
+	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model.MindmapInfo{Name: mindmapName}, model.MindmapFilter{Name: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mindmap: %w", err)
 	}
@@ -111,7 +111,7 @@ func handleMindmapPermission(s *Session, cmd model2.Command) (interface{}, error
 
 	// Set new permission
 	isPublic := strings.ToLower(cmd.Args[1]) == "public"
-	err = s.DataManager.MindmapManager.MindmapUpdate(user, mindmap, model2.MindmapInfo{IsPublic: isPublic}, model2.MindmapFilter{IsPublic: true})
+	err = s.DataManager.MindmapManager.MindmapUpdate(user, mindmap, model.MindmapInfo{IsPublic: isPublic}, model.MindmapFilter{IsPublic: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update mindmap permission: %w", err)
 	}
@@ -126,7 +126,7 @@ func handleMindmapPermission(s *Session, cmd model2.Command) (interface{}, error
 }
 
 // handleMindmapImport handles the mindmap import command
-func handleMindmapImport(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapImport(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("mindmap import command requires 1 or 2 arguments: <filename> [json|xml]")
 	}
@@ -158,7 +158,7 @@ func handleMindmapImport(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapExport handles the mindmap export command
-func handleMindmapExport(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapExport(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("mindmap export command requires 1 or 2 arguments: <filename> [json|xml]")
 	}
@@ -192,7 +192,7 @@ func handleMindmapExport(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapSelect handles the mindmap select command
-func handleMindmapSelect(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapSelect(s *Session, cmd model.Command) (interface{}, error) {
 	user, err := s.UserGet()
 	if err != nil {
 		return nil, fmt.Errorf("no user selected: %w", err)
@@ -205,7 +205,7 @@ func handleMindmapSelect(s *Session, cmd model2.Command) (interface{}, error) {
 	}
 
 	mindmapName := cmd.Args[0]
-	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model2.MindmapInfo{Name: mindmapName}, model2.MindmapFilter{Name: true})
+	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model.MindmapInfo{Name: mindmapName}, model.MindmapFilter{Name: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mindmap: %w", err)
 	}
@@ -226,13 +226,13 @@ func handleMindmapSelect(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapList handles the mindmap list command
-func handleMindmapList(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapList(s *Session, cmd model.Command) (interface{}, error) {
 	user, err := s.UserGet()
 	if err != nil {
 		return nil, fmt.Errorf("no user selected: %w", err)
 	}
 
-	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model2.MindmapInfo{}, model2.MindmapFilter{})
+	mindmaps, err := s.DataManager.MindmapManager.MindmapGet(user, model.MindmapInfo{}, model.MindmapFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get mindmaps: %w", err)
 	}
@@ -241,21 +241,21 @@ func handleMindmapList(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleMindmapView handles the mindmap view command
-func handleMindmapView(s *Session, cmd model2.Command) (interface{}, error) {
+func handleMindmapView(s *Session, cmd model.Command) (interface{}, error) {
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
 	showID := false
-	var node *model2.Node
+	var node *model.Node
 
 	for _, arg := range cmd.Args {
 		if arg == "--id" {
 			showID = true
 		} else {
 			// Assume the argument is an index
-			nodes, err := s.DataManager.NodeManager.NodeGet(currentMindmap, model2.NodeInfo{Index: arg}, model2.NodeFilter{Index: true})
+			nodes, err := s.DataManager.NodeManager.NodeGet(currentMindmap, model.NodeInfo{Index: arg}, model.NodeFilter{Index: true})
 			if err != nil {
 				return nil, fmt.Errorf("failed to get node: %w", err)
 			}
@@ -277,7 +277,7 @@ func handleMindmapView(s *Session, cmd model2.Command) (interface{}, error) {
 
 // formatNodeForDisplay is a helper function to format a node and its children for display
 // This is a placeholder implementation and should be replaced with actual formatting logic
-func formatNodeForDisplay(node *model2.Node, showID bool) string {
+func formatNodeForDisplay(node *model.Node, showID bool) string {
 	// Implement the logic to format the node and its children for display
 	// This could involve recursively traversing the node's children and creating a string representation
 	return fmt.Sprintf("Node: %s (ID: %d)", node.Name, node.ID)

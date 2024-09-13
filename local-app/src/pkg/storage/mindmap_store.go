@@ -2,16 +2,16 @@ package storage
 
 import (
 	"fmt"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 	"time"
 )
 
 // MindmapStore defines the interface for mindmap-related storage operations.
 type MindmapStore interface {
-	MindmapAdd(user *model2.User, newMindmapInfo model2.MindmapInfo) (int, error)
-	MindmapGet(user *model2.User, mindmapInfo model2.MindmapInfo, mindmapFilter model2.MindmapFilter) ([]*model2.Mindmap, error)
-	MindmapUpdate(mindmap *model2.Mindmap, mindmapUpdateInfo model2.MindmapInfo, mindmapFilter model2.MindmapFilter) error
-	MindmapDelete(mindmap *model2.Mindmap) error
+	MindmapAdd(user *model.User, newMindmapInfo model.MindmapInfo) (int, error)
+	MindmapGet(user *model.User, mindmapInfo model.MindmapInfo, mindmapFilter model.MindmapFilter) ([]*model.Mindmap, error)
+	MindmapUpdate(mindmap *model.Mindmap, mindmapUpdateInfo model.MindmapInfo, mindmapFilter model.MindmapFilter) error
+	MindmapDelete(mindmap *model.Mindmap) error
 }
 
 // MindmapStorage implements the MindmapStore interface.
@@ -25,9 +25,9 @@ func NewMindmapStorage(storage *Storage) *MindmapStorage {
 }
 
 // MindmapAdd adds a new mindmap to the database.
-func (s *MindmapStorage) MindmapAdd(user *model2.User, newMindmap model2.MindmapInfo) (int, error) {
+func (s *MindmapStorage) MindmapAdd(user *model.User, newMindmap model.MindmapInfo) (int, error) {
 	// Check if the user already has a mindmap with the same name
-	existingMindmaps, err := s.MindmapGet(user, newMindmap, model2.MindmapFilter{Name: true, Owner: true})
+	existingMindmaps, err := s.MindmapGet(user, newMindmap, model.MindmapFilter{Name: true, Owner: true})
 	if err != nil {
 		return 0, fmt.Errorf("failed to check for existing mindmap: %w", err)
 	}
@@ -78,7 +78,7 @@ func (s *MindmapStorage) MindmapAdd(user *model2.User, newMindmap model2.Mindmap
 }
 
 // MindmapGet retrieves mindmaps based on the provided info and filter.
-func (s *MindmapStorage) MindmapGet(user *model2.User, mindmapInfo model2.MindmapInfo, mindmapFilter model2.MindmapFilter) ([]*model2.Mindmap, error) {
+func (s *MindmapStorage) MindmapGet(user *model.User, mindmapInfo model.MindmapInfo, mindmapFilter model.MindmapFilter) ([]*model.Mindmap, error) {
 	db := s.storage.GetDatabase()
 	query := "SELECT id, mindmap_name, owner, is_public, created, updated FROM mindmaps WHERE 1=1"
 	var args []interface{}
@@ -106,9 +106,9 @@ func (s *MindmapStorage) MindmapGet(user *model2.User, mindmapInfo model2.Mindma
 	}
 	defer rows.Close()
 
-	var mindmaps []*model2.Mindmap
+	var mindmaps []*model.Mindmap
 	for rows.Next() {
-		var m model2.Mindmap
+		var m model.Mindmap
 		err := rows.Scan(&m.ID, &m.Name, &m.Owner, &m.IsPublic, &m.Created, &m.Updated)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan mindmap row: %w", err)
@@ -124,7 +124,7 @@ func (s *MindmapStorage) MindmapGet(user *model2.User, mindmapInfo model2.Mindma
 }
 
 // MindmapUpdate updates an existing mindmap in the database.
-func (s *MindmapStorage) MindmapUpdate(mindmap *model2.Mindmap, mindmapUpdateInfo model2.MindmapInfo, mindmapFilter model2.MindmapFilter) error {
+func (s *MindmapStorage) MindmapUpdate(mindmap *model.Mindmap, mindmapUpdateInfo model.MindmapInfo, mindmapFilter model.MindmapFilter) error {
 	db := s.storage.GetDatabase()
 	query := "UPDATE mindmaps SET updated = ? WHERE id = ?"
 	args := []interface{}{time.Now(), mindmap.ID}
@@ -151,7 +151,7 @@ func (s *MindmapStorage) MindmapUpdate(mindmap *model2.Mindmap, mindmapUpdateInf
 }
 
 // MindmapDelete removes a mindmap from the database.
-func (s *MindmapStorage) MindmapDelete(mindmap *model2.Mindmap) error {
+func (s *MindmapStorage) MindmapDelete(mindmap *model.Mindmap) error {
 	db := s.storage.GetDatabase()
 
 	// Start a transaction

@@ -3,11 +3,11 @@ package session
 import (
 	"errors"
 	"fmt"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // handleUserAdd handles the user add command
-func handleUserAdd(s *Session, cmd model2.Command) (interface{}, error) {
+func handleUserAdd(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("invalid number of arguments for user add")
 	}
@@ -18,7 +18,7 @@ func handleUserAdd(s *Session, cmd model2.Command) (interface{}, error) {
 		password = cmd.Args[1]
 	}
 
-	userInfo := model2.UserInfo{
+	userInfo := model.UserInfo{
 		Username:     username,
 		PasswordHash: []byte(password), // Password is already hashed
 	}
@@ -32,7 +32,7 @@ func handleUserAdd(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleUserUpdate handles the user update command
-func handleUserUpdate(s *Session, cmd model2.Command) (interface{}, error) {
+func handleUserUpdate(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 3 {
 		return nil, errors.New("invalid number of arguments for user update")
 	}
@@ -47,8 +47,8 @@ func handleUserUpdate(s *Session, cmd model2.Command) (interface{}, error) {
 		return nil, fmt.Errorf("can only update the current user")
 	}
 
-	updateInfo := model2.UserInfo{}
-	updateFilter := model2.UserFilter{}
+	updateInfo := model.UserInfo{}
+	updateFilter := model.UserFilter{}
 
 	if len(cmd.Args) > 1 {
 		updateInfo.Username = cmd.Args[1]
@@ -74,7 +74,7 @@ func handleUserUpdate(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleUserDelete handles the user delete command
-func handleUserDelete(s *Session, cmd model2.Command) (interface{}, error) {
+func handleUserDelete(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) != 1 {
 		return nil, errors.New("invalid number of arguments for user delete")
 	}
@@ -102,13 +102,13 @@ func handleUserDelete(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // handleUserSelect handles the user select command
-func handleUserSelect(s *Session, cmd model2.Command) (interface{}, error) {
+func handleUserSelect(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) != 1 {
 		return nil, errors.New("invalid number of arguments for user select")
 	}
 
 	username := cmd.Args[0]
-	users, err := s.DataManager.UserManager.UserGet(model2.UserInfo{Username: username}, model2.UserFilter{Username: true})
+	users, err := s.DataManager.UserManager.UserGet(model.UserInfo{Username: username}, model.UserFilter{Username: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}

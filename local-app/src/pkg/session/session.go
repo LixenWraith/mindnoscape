@@ -3,19 +3,19 @@ package session
 import (
 	"errors"
 	"mindnoscape/local-app/src/pkg/data"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 	"time"
 )
 
 // CommandHandler is a function type for command handlers
-type CommandHandler func(*Session, model2.Command) (interface{}, error)
+type CommandHandler func(*Session, model.Command) (interface{}, error)
 
 // Session represents an individual user session
 type Session struct {
 	ID              string
 	DataManager     *data.DataManager
-	User            *model2.User
-	Mindmap         *model2.Mindmap
+	User            *model.User
+	Mindmap         *model.Mindmap
 	LastActivity    time.Time
 	commandHandlers map[string]map[string]CommandHandler
 }
@@ -42,7 +42,7 @@ func (s *Session) initCommandHandlers() {
 }
 
 // CommandRun executes a command within the session context
-func (s *Session) CommandRun(cmd model2.Command) (interface{}, error) {
+func (s *Session) CommandRun(cmd model.Command) (interface{}, error) {
 	s.updateLastActivity()
 
 	scopeHandlers, ok := s.commandHandlers[cmd.Scope]
@@ -64,7 +64,7 @@ func (s *Session) updateLastActivity() {
 }
 
 // UserGet retrieves the current user
-func (s *Session) UserGet() (*model2.User, error) {
+func (s *Session) UserGet() (*model.User, error) {
 	if s.User == nil {
 		return nil, errors.New("no user selected")
 	}
@@ -72,12 +72,12 @@ func (s *Session) UserGet() (*model2.User, error) {
 }
 
 // UserSet sets the current user
-func (s *Session) UserSet(user *model2.User) {
+func (s *Session) UserSet(user *model.User) {
 	s.User = user
 }
 
 // MindmapGet retrieves the current mindmap
-func (s *Session) MindmapGet() (*model2.Mindmap, error) {
+func (s *Session) MindmapGet() (*model.Mindmap, error) {
 	if s.Mindmap == nil {
 		return nil, errors.New("no mindmap selected")
 	}
@@ -85,7 +85,7 @@ func (s *Session) MindmapGet() (*model2.Mindmap, error) {
 }
 
 // MindmapSet sets the current mindmap
-func (s *Session) MindmapSet(mindmap *model2.Mindmap) {
+func (s *Session) MindmapSet(mindmap *model.Mindmap) {
 	s.Mindmap = mindmap
 }
 

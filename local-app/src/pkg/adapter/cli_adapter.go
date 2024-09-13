@@ -4,13 +4,13 @@ package adapter
 import (
 	"fmt"
 	"mindnoscape/local-app/src/pkg/model"
-	session2 "mindnoscape/local-app/src/pkg/session"
+	"mindnoscape/local-app/src/pkg/session"
 )
 
 // CLIAdapter provides command-line interface support for managing sessions and executing commands
 type CLIAdapter struct {
 	sessionID      string
-	sessionManager *session2.SessionManager
+	sessionManager *session.SessionManager
 	cmdChan        chan model.Command
 	resultChan     chan interface{}
 	stopChan       chan struct{}
@@ -18,7 +18,7 @@ type CLIAdapter struct {
 }
 
 // NewCLIAdapter creates a new instance of CLIAdapter using the provided SessionManager
-func NewCLIAdapter(sm *session2.SessionManager) (*CLIAdapter, error) {
+func NewCLIAdapter(sm *session.SessionManager) (*CLIAdapter, error) {
 	sessionID, err := sm.SessionAdd()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
@@ -87,7 +87,7 @@ func (a *CLIAdapter) CommandProcess(cmd model.Command) (interface{}, error) {
 	cmd.Scope, cmd.Operation = a.expandCommand(cmd.Scope, cmd.Operation)
 
 	// Validate the command
-	sessionCmd := session2.NewSessionCommand(cmd)
+	sessionCmd := session.NewSessionCommand(cmd)
 	if err := sessionCmd.Validate(); err != nil {
 		return nil, fmt.Errorf("command validation failed: %w", err)
 	}

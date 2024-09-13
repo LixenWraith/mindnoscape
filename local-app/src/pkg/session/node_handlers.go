@@ -3,12 +3,12 @@ package session
 import (
 	"errors"
 	"fmt"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 	"strconv"
 	"strings"
 )
 
-func handleNodeAdd(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 2 {
 		return nil, errors.New("node add command requires at least 2 arguments: <parent> <content> [<extra field label>:<extra field value>]... [--id]")
 	}
@@ -37,7 +37,7 @@ func handleNodeAdd(s *Session, cmd model2.Command) (interface{}, error) {
 		return nil, fmt.Errorf("failed to get parent node: %w", err)
 	}
 
-	newNode := model2.NodeInfo{
+	newNode := model.NodeInfo{
 		MindmapID: currentMindmap.ID,
 		ParentID:  parentNode.ID,
 		Name:      content,
@@ -52,7 +52,7 @@ func handleNodeAdd(s *Session, cmd model2.Command) (interface{}, error) {
 	return nodeID, nil
 }
 
-func handleNodeUpdate(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeUpdate(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 2 {
 		return nil, errors.New("node update command requires at least 2 arguments: <node> <content> [<extra field label>:<extra field value>]... [--id]")
 	}
@@ -81,12 +81,12 @@ func handleNodeUpdate(s *Session, cmd model2.Command) (interface{}, error) {
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
-	updateInfo := model2.NodeInfo{
+	updateInfo := model.NodeInfo{
 		Name:    content,
 		Content: extraFields,
 	}
 
-	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, node, updateInfo, model2.NodeFilter{Name: true, Content: true})
+	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, node, updateInfo, model.NodeFilter{Name: true, Content: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update node: %w", err)
 	}
@@ -94,7 +94,7 @@ func handleNodeUpdate(s *Session, cmd model2.Command) (interface{}, error) {
 	return nil, nil
 }
 
-func handleNodeMove(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeMove(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 2 || len(cmd.Args) > 3 {
 		return nil, errors.New("node move command requires 2 or 3 arguments: <source> <target> [--id]")
 	}
@@ -118,11 +118,11 @@ func handleNodeMove(s *Session, cmd model2.Command) (interface{}, error) {
 		return nil, fmt.Errorf("failed to get target node: %w", err)
 	}
 
-	updateInfo := model2.NodeInfo{
+	updateInfo := model.NodeInfo{
 		ParentID: targetNode.ID,
 	}
 
-	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, sourceNode, updateInfo, model2.NodeFilter{ParentID: true})
+	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, sourceNode, updateInfo, model.NodeFilter{ParentID: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to move node: %w", err)
 	}
@@ -130,7 +130,7 @@ func handleNodeMove(s *Session, cmd model2.Command) (interface{}, error) {
 	return nil, nil
 }
 
-func handleNodeDelete(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeDelete(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("node delete command requires 1 or 2 arguments: <node> [--id]")
 	}
@@ -156,7 +156,7 @@ func handleNodeDelete(s *Session, cmd model2.Command) (interface{}, error) {
 	return nil, nil
 }
 
-func handleNodeFind(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeFind(s *Session, cmd model.Command) (interface{}, error) {
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
 		return nil, errors.New("node find command requires 1 or 2 arguments: <query> [--id]")
 	}
@@ -169,7 +169,7 @@ func handleNodeFind(s *Session, cmd model2.Command) (interface{}, error) {
 	query := cmd.Args[0]
 	showID := len(cmd.Args) == 2 && cmd.Args[1] == "--id"
 
-	nodes, err := s.DataManager.NodeManager.NodeFind(currentMindmap, model2.NodeFilter{Name: true, Content: true}, query)
+	nodes, err := s.DataManager.NodeManager.NodeFind(currentMindmap, model.NodeFilter{Name: true, Content: true}, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find nodes: %w", err)
 	}
@@ -187,13 +187,13 @@ func handleNodeFind(s *Session, cmd model2.Command) (interface{}, error) {
 	return results, nil
 }
 
-func handleNodeSort(s *Session, cmd model2.Command) (interface{}, error) {
+func handleNodeSort(s *Session, cmd model.Command) (interface{}, error) {
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
-	var parentNode *model2.Node
+	var parentNode *model.Node
 	var field string
 	reverse := false
 	useID := false
@@ -227,9 +227,9 @@ func handleNodeSort(s *Session, cmd model2.Command) (interface{}, error) {
 }
 
 // getNode is a helper function to get a node by its identifier (index or ID)
-func getNode(s *Session, mindmap *model2.Mindmap, identifier string, useID bool) (*model2.Node, error) {
-	var nodeInfo model2.NodeInfo
-	var nodeFilter model2.NodeFilter
+func getNode(s *Session, mindmap *model.Mindmap, identifier string, useID bool) (*model.Node, error) {
+	var nodeInfo model.NodeInfo
+	var nodeFilter model.NodeFilter
 
 	if useID {
 		id, err := strconv.Atoi(identifier)

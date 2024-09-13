@@ -3,7 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	model2 "mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/model"
 	"strconv"
 	"strings"
 	"time"
@@ -11,10 +11,10 @@ import (
 
 // NodeStore defines the interface for node-related storage operations.
 type NodeStore interface {
-	NodeAdd(mindmap *model2.Mindmap, newNodeInfo model2.NodeInfo, forceID ...bool) (int, error)
-	NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo, nodeFilter model2.NodeFilter) ([]*model2.Node, error)
-	NodeUpdate(mindmap *model2.Mindmap, node *model2.Node, nodeUpdateInfo model2.NodeInfo, nodeUpdateFilter model2.NodeFilter) error
-	NodeDelete(mindmap *model2.Mindmap, node *model2.Node) error
+	NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo, forceID ...bool) (int, error)
+	NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, nodeFilter model.NodeFilter) ([]*model.Node, error)
+	NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeUpdateInfo model.NodeInfo, nodeUpdateFilter model.NodeFilter) error
+	NodeDelete(mindmap *model.Mindmap, node *model.Node) error
 }
 
 // NodeStorage implements the NodeStore interface.
@@ -28,7 +28,7 @@ func NewNodeStorage(storage *Storage) *NodeStorage {
 }
 
 // NodeAdd adds a new node to the database.
-func (s *NodeStorage) NodeAdd(mindmap *model2.Mindmap, newNodeInfo model2.NodeInfo, forceID ...bool) (int, error) {
+func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo, forceID ...bool) (int, error) {
 	db := s.storage.GetDatabase()
 	now := time.Now()
 
@@ -87,7 +87,7 @@ func (s *NodeStorage) NodeAdd(mindmap *model2.Mindmap, newNodeInfo model2.NodeIn
 }
 
 // NodeGet retrieves nodes based on the provided info and filter.
-func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo, nodeFilter model2.NodeFilter) ([]*model2.Node, error) {
+func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, nodeFilter model.NodeFilter) ([]*model.Node, error) {
 	db := s.storage.GetDatabase()
 
 	// Construct the table names safely
@@ -97,6 +97,7 @@ func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo,
 	query := "SELECT id, parent_id, node_name, index_value, created, updated FROM " + nodesTable + " WHERE mindmap_id = ?"
 	var args []interface{}
 
+	// Create fetch query based on node filter
 	args = append(args, mindmap.ID)
 	if nodeFilter.ID {
 		query += " AND id = ?"
@@ -115,15 +116,17 @@ func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo,
 		args = append(args, nodeInfo.Index)
 	}
 
+	// Query the db for node
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query nodes: %w", err)
 	}
 	defer rows.Close()
 
-	var nodes []*model2.Node
+	// Scan the query result into in-memory structure
+	var nodes []*model.Node
 	for rows.Next() {
-		var n model2.Node
+		var n model.Node
 		err := rows.Scan(&n.ID, &n.ParentID, &n.Name, &n.Index, &n.Created, &n.Updated)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan node row: %w", err)
@@ -137,7 +140,7 @@ func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo,
 		return nil, fmt.Errorf("error iterating node rows: %w", err)
 	}
 
-	// Fetch content for each node
+	// Query the db for node content
 	for _, node := range nodes {
 		contentQuery := fmt.Sprintf("SELECT key, value FROM %s WHERE node_id = ?", contentTable)
 		contentRows, err := db.Query(contentQuery, mindmap.ID, node.ID)
@@ -146,6 +149,7 @@ func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo,
 		}
 		defer contentRows.Close()
 
+		// Scan the query result into in-memory structure
 		for contentRows.Next() {
 			var key, value string
 			if err := contentRows.Scan(&key, &value); err != nil {
@@ -163,7 +167,7 @@ func (s *NodeStorage) NodeGet(mindmap *model2.Mindmap, nodeInfo model2.NodeInfo,
 }
 
 // NodeUpdate updates an existing node in the database.
-func (s *NodeStorage) NodeUpdate(mindmap *model2.Mindmap, node *model2.Node, nodeUpdateInfo model2.NodeInfo, nodeUpdateFilter model2.NodeFilter) error {
+func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeUpdateInfo model.NodeInfo, nodeUpdateFilter model.NodeFilter) error {
 	db := s.storage.GetDatabase()
 
 	var err error
@@ -193,8 +197,8 @@ func (s *NodeStorage) NodeUpdate(mindmap *model2.Mindmap, node *model2.Node, nod
 		args = append(args, time.Now())
 
 		// Use a prepared statement with a placeholder for the table name
-		query := "UPDATE nodes_? SET " + strings.Join(updates, ", ") + " WHERE id = ?"
-		args = append([]interface{}{mindmap.ID}, args...)
+		tableName := fmt.Sprintf("nodes_%d", mindmap.ID)
+		query := fmt.Sprintf("UPDATE %s SET %s WHERE id = ?", tableName, strings.Join(updates, ", "))
 		args = append(args, node.ID)
 
 		_, err = db.Exec(query, args...)
@@ -203,19 +207,20 @@ func (s *NodeStorage) NodeUpdate(mindmap *model2.Mindmap, node *model2.Node, nod
 		}
 	}
 
+	// TODO: should not delete all the content?
 	if nodeUpdateFilter.Content {
 		// Delete existing content
-		deleteQuery := "DELETE FROM node_content_? WHERE node_id = ?"
-		_, err = db.Exec(deleteQuery, mindmap.ID, node.ID)
+		deleteQuery := fmt.Sprintf("DELETE FROM node_content_%d WHERE node_id = ?", mindmap.ID)
+		_, err = db.Exec(deleteQuery, node.ID)
 		if err != nil {
 			return fmt.Errorf("failed to delete existing node content: %w", err)
 		}
 
 		// Insert new content
 		if len(nodeUpdateInfo.Content) > 0 {
-			insertQuery := "INSERT INTO node_content_? (node_id, key, value) VALUES (?, ?, ?)"
+			insertQuery := fmt.Sprintf("INSERT INTO node_content_%d (node_id, key, value) VALUES (?, ?, ?)", mindmap.ID)
 			for key, value := range nodeUpdateInfo.Content {
-				_, err = db.Exec(insertQuery, mindmap.ID, node.ID, key, value)
+				_, err = db.Exec(insertQuery, node.ID, key, value)
 				if err != nil {
 					return fmt.Errorf("failed to insert new node content: %w", err)
 				}
@@ -227,7 +232,7 @@ func (s *NodeStorage) NodeUpdate(mindmap *model2.Mindmap, node *model2.Node, nod
 }
 
 // NodeDelete removes a node from the database.
-func (s *NodeStorage) NodeDelete(mindmap *model2.Mindmap, node *model2.Node) error {
+func (s *NodeStorage) NodeDelete(mindmap *model.Mindmap, node *model.Node) error {
 	db := s.storage.GetDatabase()
 
 	if err := db.Begin(); err != nil {

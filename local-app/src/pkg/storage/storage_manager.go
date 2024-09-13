@@ -38,11 +38,13 @@ func NewStorage(config *model.Config) (*Storage, error) {
 		db: db,
 	}
 
+	// Create user and mindmap tables
 	if err := storage.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %s", err)
 	}
 
+	// Create storages
 	storage.UserStore = NewUserStorage(storage)
 	storage.MindmapStore = NewMindmapStorage(storage)
 	storage.NodeStore = NewNodeStorage(storage)

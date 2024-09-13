@@ -20,13 +20,6 @@ type DataManager struct {
 	Logger         *log.Logger
 }
 
-// DataOperations defines the interface for mindmap-related operations
-type DataOperations interface {
-	// todo: add user/subtree export functionalities and generalize
-	MindmapExport(filename, format string) error
-	MindmapImport(filename, format string) (*model.Mindmap, error)
-}
-
 // NewDataManager creates a new Manager instance
 func NewDataManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *model.Config, logger *log.Logger) (*DataManager, error) {
 	eventManager := event.NewEventManager()
