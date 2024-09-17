@@ -5,6 +5,7 @@ package data
 import (
 	"crypto/subtle"
 	"fmt"
+
 	"mindnoscape/local-app/src/pkg/event"
 	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"

@@ -2,8 +2,9 @@ package storage
 
 import (
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"time"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // MindmapStore defines the interface for mindmap-related storage operations.

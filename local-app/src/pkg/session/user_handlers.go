@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+
 	"mindnoscape/local-app/src/pkg/model"
 )
 

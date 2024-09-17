@@ -2,9 +2,10 @@ package session
 
 import (
 	"errors"
+	"time"
+
 	"mindnoscape/local-app/src/pkg/data"
 	"mindnoscape/local-app/src/pkg/model"
-	"time"
 )
 
 // CommandHandler is a function type for command handlers

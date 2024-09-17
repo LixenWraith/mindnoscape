@@ -3,7 +3,9 @@
 package data
 
 import (
+	"context"
 	"fmt"
+
 	"mindnoscape/local-app/src/pkg/event"
 	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
@@ -74,8 +76,8 @@ func (mm *MindmapManager) MindmapAdd(user *model.User, newMindmapInfo model.Mind
 	}
 	newMindmap := mindmaps[0]
 
-	fmt.Println("DEBUG: Added mindmap with ID", newMindmap.ID, "and name", newMindmap.Name)
-	fmt.Println("DEBUG: newMindmap: ", newMindmap)
+	mm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Added mindmap with ID %d and name %s\n", newMindmap.ID, newMindmap.Name))
+	mm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: newMindmap: %v", newMindmap))
 
 	// Initialize the Nodes map
 	newMindmap.Nodes = make(map[int]*model.Node)
@@ -86,7 +88,7 @@ func (mm *MindmapManager) MindmapAdd(user *model.User, newMindmapInfo model.Mind
 		Data: newMindmap,
 	})
 
-	fmt.Printf("DEBUG: Published MindmapAdded event for mindmap %d\n", id)
+	mm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Published MindmapAdded event for mindmap %d\n", id))
 
 	return id, nil
 }
@@ -238,14 +240,14 @@ func (mm *MindmapManager) calculateMindmapDepth(root *model.Node) int {
 func (mm *MindmapManager) handleUserDeleted(e event.Event) {
 	user, ok := e.Data.(*model.User)
 	if !ok {
-		mm.logger.LogError(fmt.Errorf("Invalid event data for user delete event"))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Invalid event data for user delete event"))
 		return
 	}
 
 	// Get all mindmaps owned by the user
 	mindmaps, err := mm.MindmapGet(user, model.MindmapInfo{Owner: user.Username}, model.MindmapFilter{Owner: true})
 	if err != nil {
-		mm.logger.LogError(fmt.Errorf("Failed to get mindmaps for deleted user %s: %v", user.Username, err))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Failed to get mindmaps for deleted user %s: %v", user.Username, err))
 		return
 	}
 
@@ -253,7 +255,7 @@ func (mm *MindmapManager) handleUserDeleted(e event.Event) {
 	for _, mindmap := range mindmaps {
 		err := mm.MindmapDelete(user, mindmap)
 		if err != nil {
-			mm.logger.LogError(fmt.Errorf("Failed to delete mindmap %d for deleted user %s: %v", mindmap.ID, user.Username, err))
+			mm.logger.LogError(context.Background(), fmt.Errorf("Failed to delete mindmap %d for deleted user %s: %v", mindmap.ID, user.Username, err))
 		}
 	}
 }
@@ -262,38 +264,38 @@ func (mm *MindmapManager) handleUserDeleted(e event.Event) {
 func (mm *MindmapManager) handleRootNodeRenamed(e event.Event) {
 	data, ok := e.Data.(map[string]interface{})
 	if !ok {
-		mm.logger.LogError(fmt.Errorf("Invalid event data for root node rename event"))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Invalid event data for root node rename event"))
 		return
 	}
 
 	mindmapID, ok := data["mindmapID"].(int)
 	if !ok {
-		mm.logger.LogError(fmt.Errorf("Invalid mindmap ID in root node rename event"))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Invalid mindmap ID in root node rename event"))
 		return
 	}
 
 	newName, ok := data["newName"].(string)
 	if !ok {
-		mm.logger.LogError(fmt.Errorf("Invalid new name in root node rename event"))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Invalid new name in root node rename event"))
 		return
 	}
 
 	// Prevent setting an empty name for the mindmap
 	if newName == "" {
-		mm.logger.LogError(fmt.Errorf("Attempted to set empty name for mindmap %d", mindmapID))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Attempted to set empty name for mindmap %d", mindmapID))
 		return
 	}
 
 	oldName, ok := data["oldName"].(string)
 	if !ok {
-		mm.logger.LogError(fmt.Errorf("Invalid old name in root node rename event"))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Invalid old name in root node rename event"))
 		return
 	}
 
 	// Get the mindmap
 	mindmaps, err := mm.MindmapGet(nil, model.MindmapInfo{ID: mindmapID}, model.MindmapFilter{ID: true})
 	if err != nil || len(mindmaps) == 0 {
-		mm.logger.LogError(fmt.Errorf("Failed to get mindmap %d: %v", mindmapID, err))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Failed to get mindmap %d: %v", mindmapID, err))
 		return
 	}
 	mindmap := mindmaps[0]
@@ -301,7 +303,7 @@ func (mm *MindmapManager) handleRootNodeRenamed(e event.Event) {
 	// Update the mindmap name
 	err = mm.MindmapUpdate(nil, mindmap, model.MindmapInfo{Name: newName}, model.MindmapFilter{Name: true})
 	if err != nil {
-		mm.logger.LogError(fmt.Errorf("Failed to update mindmap name for mindmap %d: %v", mindmapID, err))
+		mm.logger.LogError(context.Background(), fmt.Errorf("Failed to update mindmap name for mindmap %d: %v", mindmapID, err))
 		return
 	}
 

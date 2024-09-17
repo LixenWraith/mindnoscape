@@ -3,10 +3,11 @@ package storage
 import (
 	"database/sql"
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"strconv"
 	"strings"
 	"time"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // NodeStore defines the interface for node-related storage operations.

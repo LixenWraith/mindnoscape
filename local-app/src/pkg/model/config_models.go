@@ -8,6 +8,7 @@ type Config struct {
 	LogFolder           string `json:"log_folder"`
 	CommandLog          string `json:"command_log"`
 	ErrorLog            string `json:"error_log"`
+	InfoLog             string `json:"info_log"`
 	DefaultUser         string `json:"default_user"`
 	DefaultUserActive   bool   `json:"default_user_active"`
 	DefaultUserPassword string `json:"default_user_password"`

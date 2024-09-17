@@ -1,13 +1,16 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"mindnoscape/local-app/src/pkg/log"
+	"time"
+
 	"mindnoscape/local-app/src/pkg/data"
 	"mindnoscape/local-app/src/pkg/model"
-	"time"
 )
 
 const (
@@ -23,6 +26,7 @@ type SessionManager struct {
 	cleanupTicker *time.Ticker
 	done          chan bool
 	commandQueue  chan commandExecution
+	logger        *log.Logger
 }
 
 // commandExecution represents a command to be executed in a session, its result and error
@@ -34,12 +38,13 @@ type commandExecution struct {
 }
 
 // NewSessionManager starts the command execution goroutine
-func NewSessionManager(dataManager *data.DataManager) *SessionManager {
+func NewSessionManager(dataManager *data.DataManager, logger *log.Logger) *SessionManager {
 	sm := &SessionManager{
 		sessions:     make(map[string]*Session),
 		dataManager:  dataManager,
 		done:         make(chan bool),
 		commandQueue: make(chan commandExecution),
+		logger:       logger,
 	}
 	sm.startCleanupRoutine()
 	go sm.commandExecutor()
@@ -50,18 +55,21 @@ func NewSessionManager(dataManager *data.DataManager) *SessionManager {
 func (sm *SessionManager) SessionAdd() (string, error) {
 	sessionID, _ := generateSessionID()
 	sm.sessions[sessionID] = NewSession(sessionID, sm.dataManager)
+	sm.logger.LogInfo(context.Background(), fmt.Sprintf("Session %s created", sessionID))
 	return sessionID, nil
 }
 
 // SessionGet retrieves a session by its ID
 func (sm *SessionManager) SessionGet(sessionID string) (*Session, bool) {
 	session, exists := sm.sessions[sessionID]
+	sm.logger.LogInfo(context.Background(), fmt.Sprintf("Session %s retrieved", sessionID))
 	return session, exists
 }
 
 // SessionDelete removes a session
 func (sm *SessionManager) SessionDelete(sessionID string) {
 	delete(sm.sessions, sessionID)
+	sm.logger.LogInfo(context.Background(), fmt.Sprintf("Session %s deleted", sessionID))
 }
 
 // SessionRun executes a command for a specific session
@@ -85,7 +93,7 @@ func (sm *SessionManager) SessionRun(sessionID string, cmd model.Command) (inter
 		mindmapName = currentMindmap.Name
 	}
 
-	fmt.Printf("DEBUG: Current Session State - User: %s, Mindmap: %s\n", userName, mindmapName)
+	sm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Current Session State - User: %s, Mindmap: %s\n", userName, mindmapName))
 
 	result := make(chan interface{})
 	err := make(chan error)

@@ -3,9 +3,10 @@ package session
 import (
 	"errors"
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"strconv"
 	"strings"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {

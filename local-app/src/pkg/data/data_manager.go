@@ -4,6 +4,7 @@ package data
 
 import (
 	"fmt"
+
 	"mindnoscape/local-app/src/pkg/event"
 	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
@@ -21,7 +22,7 @@ type DataManager struct {
 }
 
 // NewDataManager creates a new Manager instance
-func NewDataManager(userStore storage.UserStore, mindmapStore storage.MindmapStore, nodeStore storage.NodeStore, cfg *model.Config, logger *log.Logger) (*DataManager, error) {
+func NewDataManager(store *storage.Storage, cfg *model.Config, logger *log.Logger) (*DataManager, error) {
 	eventManager := event.NewEventManager()
 	m := &DataManager{
 		EventManager: eventManager,
@@ -31,19 +32,19 @@ func NewDataManager(userStore storage.UserStore, mindmapStore storage.MindmapSto
 
 	// Initialize UserManager
 	var err error
-	m.UserManager, err = NewUserManager(userStore, eventManager, logger)
+	m.UserManager, err = NewUserManager(store.UserStore, eventManager, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UserManager: %w", err)
 	}
 
 	// Initialize MindmapManager
-	m.MindmapManager, err = NewMindmapManager(mindmapStore, eventManager, logger)
+	m.MindmapManager, err = NewMindmapManager(store.MindmapStore, eventManager, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MindmapManager: %w", err)
 	}
 
 	// Initialize NodeManager
-	m.NodeManager, err = NewNodeManager(nodeStore, eventManager, logger)
+	m.NodeManager, err = NewNodeManager(store.NodeStore, eventManager, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NodeManager: %w", err)
 	}

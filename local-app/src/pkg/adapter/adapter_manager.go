@@ -2,10 +2,19 @@ package adapter
 
 import (
 	"fmt"
+	"mindnoscape/local-app/src/pkg/log"
+	"sync"
+
 	"mindnoscape/local-app/src/pkg/model"
 	"mindnoscape/local-app/src/pkg/session"
-	"sync"
 )
+
+// DataOperations defines the interface for mindmap-related operations
+type DataOperations interface {
+	// TODO: add user/subtree export functionalities and generalize
+	MindmapExport(filename, format string) error
+	MindmapImport(filename, format string) (*model.Mindmap, error)
+}
 
 // AdapterInstance represents an instance of an adapter
 type AdapterInstance interface {
@@ -32,6 +41,7 @@ type AdapterManager struct {
 	sessionManager *session.SessionManager
 	cmdChan        chan commandRequest
 	stopChan       chan struct{}
+	logger         *log.Logger
 }
 
 // commandRequest represents a request to execute a command within a specific session and carries a result channel
@@ -42,12 +52,13 @@ type commandRequest struct {
 }
 
 // NewAdapterManager creates a new AdapterManager
-func NewAdapterManager(sm *session.SessionManager) *AdapterManager {
+func NewAdapterManager(sm *session.SessionManager, logger *log.Logger) *AdapterManager {
 	am := &AdapterManager{
 		factories:      make(map[string]AdapterFactory),
 		sessionManager: sm,
 		cmdChan:        make(chan commandRequest),
 		stopChan:       make(chan struct{}),
+		logger:         logger,
 	}
 	go am.commandHandler()
 	return am

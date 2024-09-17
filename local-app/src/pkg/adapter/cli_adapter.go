@@ -2,7 +2,10 @@
 package adapter
 
 import (
+	"context"
 	"fmt"
+	"mindnoscape/local-app/src/pkg/log"
+
 	"mindnoscape/local-app/src/pkg/model"
 	"mindnoscape/local-app/src/pkg/session"
 )
@@ -15,15 +18,16 @@ type CLIAdapter struct {
 	resultChan     chan interface{}
 	stopChan       chan struct{}
 	errChan        chan error
+	logger         *log.Logger
 }
 
 // NewCLIAdapter creates a new instance of CLIAdapter using the provided SessionManager
-func NewCLIAdapter(sm *session.SessionManager) (*CLIAdapter, error) {
+func NewCLIAdapter(sm *session.SessionManager, logger *log.Logger) (*CLIAdapter, error) {
 	sessionID, err := sm.SessionAdd()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
-	fmt.Printf("DEBUG: Created new session with ID: %s\n", sessionID)
+	logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Created new session with ID: %s\n", sessionID))
 	return &CLIAdapter{
 		sessionManager: sm,
 		sessionID:      sessionID,
@@ -31,39 +35,40 @@ func NewCLIAdapter(sm *session.SessionManager) (*CLIAdapter, error) {
 		resultChan:     make(chan interface{}),
 		errChan:        make(chan error),
 		stopChan:       make(chan struct{}),
+		logger:         logger,
 	}, nil
 }
 
 // AdapterStart AdapterRun Run starts the CLI adapter's main loop
 func (a *CLIAdapter) AdapterStart() error {
-	fmt.Println("DEBUG: Entering AdapterStart method")
+	a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Entering AdapterStart method\n"))
 	go func() {
-		fmt.Println("DEBUG: Started command processing goroutine")
+		a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Started command processing goroutine\n"))
 		for {
-			fmt.Println("DEBUG: Waiting for command in AdapterStart")
+			a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Waiting for command in AdapterStart\n"))
 			select {
 			case cmd := <-a.cmdChan:
-				fmt.Printf("DEBUG: Received command in AdapterStart: %+v\n", cmd)
+				a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Received command in AdapterStart: %+v\n", cmd))
 				if a.sessionID == "" {
-					fmt.Println("DEBUG: Error: sessionID is empty")
+					a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Error: sessionID is empty\n"))
 					a.errChan <- fmt.Errorf("no active session")
 					continue
 				}
 				result, err := a.sessionManager.SessionRun(a.sessionID, cmd)
 				if err != nil {
-					fmt.Printf("DEBUG: Error processing command: %v\n", err)
+					a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Error processing command: %v\n", err))
 					a.errChan <- err
 				} else {
-					fmt.Println("DEBUG: Command processed successfully")
+					a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Command processed successfully\n"))
 					a.resultChan <- result
 				}
 			case <-a.stopChan:
-				fmt.Println("DEBUG: Stopping command processing goroutine")
+				a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Stopping command processing goroutine\n"))
 				return
 			}
 		}
 	}()
-	fmt.Println("DEBUG: Exiting AdapterStart method")
+	a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Exiting AdapterStart method\n"))
 	return nil
 }
 
@@ -82,7 +87,7 @@ func (a *CLIAdapter) GetType() string {
 
 // CommandProcess processes a command and returns the result
 func (a *CLIAdapter) CommandProcess(cmd model.Command) (interface{}, error) {
-	fmt.Println("DEBUG: Entering CommandProcess method")
+	a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Entering CommandProcess method"))
 	// Expand short commands to full commands
 	cmd.Scope, cmd.Operation = a.expandCommand(cmd.Scope, cmd.Operation)
 
@@ -95,15 +100,15 @@ func (a *CLIAdapter) CommandProcess(cmd model.Command) (interface{}, error) {
 	// Send command to the channel
 	a.cmdChan <- cmd
 
-	fmt.Println("DEBUG: CommandProcess method sent the command to the channel")
+	a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: CommandProcess method sent the command to the channel\n"))
 
 	// Wait for result or error
 	select {
 	case result := <-a.resultChan:
-		fmt.Printf("DEBUG: Received result: %v\n", result)
+		a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Received result: %v\n", result))
 		return result, nil
 	case err := <-a.errChan:
-		fmt.Printf("DEBUG: Received error: %v\n", err)
+		a.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Received error: %v\n", err))
 		return nil, err
 	}
 }

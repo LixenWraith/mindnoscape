@@ -3,14 +3,16 @@
 package data
 
 import (
+	"context"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
 	"mindnoscape/local-app/src/pkg/event"
 	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
 	"mindnoscape/local-app/src/pkg/storage"
-	"sort"
-	"strconv"
-	"strings"
 )
 
 // NodeOperations defines the interface for node-related operations
@@ -52,23 +54,23 @@ func NewNodeManager(nodeStore storage.NodeStore, eventManager *event.EventManage
 
 // handleMindmapAdded adds the root node after a mindmap is added
 func (nm *NodeManager) handleMindmapAdded(e event.Event) {
-	fmt.Println("DEBUG: Handling MindmapAdded event")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Handling MindmapAdded event"))
 
 	if nm.logger == nil {
-		fmt.Println("Warning: Logger is not initialized in NodeManager")
+		nm.logger.LogInfo(context.Background(), fmt.Sprintf("Warning: Logger is not initialized in NodeManager"))
 		return
 	}
 
-	fmt.Println("DEBUG: Handling MindmapAdded event - Logger ok")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Handling MindmapAdded event - Logger ok"))
 
 	mindmap, ok := e.Data.(*model.Mindmap)
 	if !ok {
-		nm.logger.LogCommand(fmt.Sprintf("Invalid event data for mindmap add event")) // todo: UI event error handler call
+		nm.logger.LogError(context.Background(), fmt.Errorf("Invalid event data for mindmap add event")) // todo: UI event error handler call
 		return
 	}
 
-	fmt.Printf("DEBUG: Handling MindmapAdded event for mindmap %d\n", mindmap.ID)
-	fmt.Printf("DEBUG: Mindmap: %v\n", mindmap)
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Handling MindmapAdded event for mindmap %d\n", mindmap.ID))
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Mindmap: %v\n", mindmap))
 
 	rootNodeInfo := model.NodeInfo{
 		ID:        0,
@@ -80,27 +82,27 @@ func (nm *NodeManager) handleMindmapAdded(e event.Event) {
 
 	_, _, err := nm.NodeAdd(mindmap, rootNodeInfo, true)
 	if err != nil {
-		nm.logger.LogCommand(fmt.Sprintf("Failed to add root node for mindmap %d: %v", mindmap.ID, err)) // todo: UI event error handler call
+		nm.logger.LogCommand(context.Background(), fmt.Sprintf("Failed to add root node for mindmap %d: %v", mindmap.ID, err)) // todo: UI event error handler call
 		return
 	}
 
-	fmt.Printf("DEBUG: Root node added for mindmap %d\n", mindmap.ID)
-	fmt.Printf("DEBUG: Mindmap: %v\n", mindmap)
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Root node added for mindmap %d\n", mindmap.ID))
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Mindmap: %v\n", mindmap))
 }
 
 // handleMindmapSelected handles the event where a mindmap is selected. It fetches the associated nodes and populates the mindmap structure.
 func (nm *NodeManager) handleMindmapSelected(e event.Event) {
-	fmt.Printf("DEBUG: Handling MindmapSelected event for mindmap %d\n", e.Data.(*model.Mindmap).ID)
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Handling MindmapSelected event for mindmap %d\n", e.Data.(*model.Mindmap).ID))
 	mindmap, ok := e.Data.(*model.Mindmap)
 	if !ok {
-		nm.logger.LogError(fmt.Errorf("invalid event data for mindmap selected event"))
+		nm.logger.LogError(context.Background(), fmt.Errorf("invalid event data for mindmap selected event"))
 		return
 	}
 
 	// Fetch all nodes for the mindmap
 	nodes, err := nm.NodeGet(mindmap, model.NodeInfo{}, model.NodeFilter{})
 	if err != nil {
-		nm.logger.LogError(fmt.Errorf("failed to fetch nodes for mindmap %d: %w", mindmap.ID, err))
+		nm.logger.LogError(context.Background(), fmt.Errorf("failed to fetch nodes for mindmap %d: %w", mindmap.ID, err))
 		return
 	}
 
@@ -113,23 +115,23 @@ func (nm *NodeManager) handleMindmapSelected(e event.Event) {
 		}
 	}
 
-	fmt.Printf("DEBUG: Loaded %d nodes for mindmap %d\n", len(nodes), mindmap.ID)
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Loaded %d nodes for mindmap %d\n", len(nodes), mindmap.ID))
 
-	nm.logger.LogCommand(fmt.Sprintf("Loaded %d nodes for mindmap %d", len(nodes), mindmap.ID))
+	nm.logger.LogCommand(context.Background(), fmt.Sprintf("Loaded %d nodes for mindmap %d", len(nodes), mindmap.ID))
 }
 
 // handleMindmapDeleted deletes all the nodes before a mindmap is added
 func (nm *NodeManager) handleMindmapDeleted(e event.Event) {
 	mindmap, ok := e.Data.(*model.Mindmap)
 	if !ok {
-		nm.logger.LogCommand(fmt.Sprintf("Invalid event data for mindmap delete event")) // todo: UI event error handler call
+		nm.logger.LogCommand(context.Background(), fmt.Sprintf("Invalid event data for mindmap delete event")) // todo: UI event error handler call
 		return
 	}
 
 	// Get the root node
 	rootNodes, err := nm.NodeGet(mindmap, model.NodeInfo{ID: 0}, model.NodeFilter{ID: true})
 	if err != nil || len(rootNodes) == 0 {
-		nm.logger.LogCommand(fmt.Sprintf("Failed to get root node for mindmap %d: %v", mindmap.ID, err)) // todo: UI event error handler call
+		nm.logger.LogError(context.Background(), fmt.Errorf("Failed to get root node for mindmap %d: %v", mindmap.ID, err)) // todo: UI event error handler call
 		return
 	}
 	rootNode := rootNodes[0]
@@ -138,14 +140,14 @@ func (nm *NodeManager) handleMindmapDeleted(e event.Event) {
 	for _, child := range rootNode.Children {
 		err := nm.NodeDelete(mindmap, child)
 		if err != nil {
-			nm.logger.LogCommand(fmt.Sprintf("Failed to delete child node %d for mindmap %d: %v", child.ID, mindmap.ID, err))
+			nm.logger.LogError(context.Background(), fmt.Errorf("Failed to delete child node %d for mindmap %d: %v", child.ID, mindmap.ID, err))
 		}
 	}
 
 	// Delete the root node with direct storage call since NodeDelete prevents deleting the root node
 	err = nm.nodeStore.NodeDelete(mindmap, rootNode)
 	if err != nil {
-		nm.logger.LogCommand(fmt.Sprintf("Failed to delete root node for mindmap %d: %v", mindmap.ID, err))
+		nm.logger.LogError(context.Background(), fmt.Errorf("Failed to delete root node for mindmap %d: %v", mindmap.ID, err))
 	}
 
 	// Clear the nodes map in the mindmap
@@ -156,19 +158,19 @@ func (nm *NodeManager) handleMindmapDeleted(e event.Event) {
 func (nm *NodeManager) handleMindmapUpdated(e event.Event) {
 	data, ok := e.Data.(map[string]interface{})
 	if !ok {
-		nm.logger.LogCommand(fmt.Sprintf("Invalid event data for mindmap update event"))
+		nm.logger.LogError(context.Background(), fmt.Errorf("Invalid event data for mindmap update event"))
 		return
 	}
 
 	mindmap, ok := data["mindmap"].(*model.Mindmap)
 	if !ok {
-		nm.logger.LogCommand(fmt.Sprintf("Invalid mindmap data in mindmap update event"))
+		nm.logger.LogError(context.Background(), fmt.Errorf("Invalid mindmap data in mindmap update event"))
 		return
 	}
 
 	oldName, ok := data["oldName"].(string)
 	if !ok {
-		nm.logger.LogCommand(fmt.Sprintf("Invalid old name in mindmap update event"))
+		nm.logger.LogError(context.Background(), fmt.Errorf("Invalid old name in mindmap update event"))
 		return
 	}
 
@@ -177,7 +179,7 @@ func (nm *NodeManager) handleMindmapUpdated(e event.Event) {
 		// Get the root node
 		rootNodes, err := nm.NodeGet(mindmap, model.NodeInfo{ParentID: -1}, model.NodeFilter{ParentID: true})
 		if err != nil || len(rootNodes) == 0 {
-			nm.logger.LogCommand(fmt.Sprintf("Failed to get root node for mindmap %d: %v", mindmap.ID, err))
+			nm.logger.LogError(context.Background(), fmt.Errorf("Failed to get root node for mindmap %d: %v", mindmap.ID, err))
 			return
 		}
 		rootNode := rootNodes[0]
@@ -185,7 +187,7 @@ func (nm *NodeManager) handleMindmapUpdated(e event.Event) {
 		// Update the root node name
 		err = nm.NodeUpdate(mindmap, rootNode, model.NodeInfo{Name: mindmap.Name}, model.NodeFilter{Name: true})
 		if err != nil {
-			nm.logger.LogCommand(fmt.Sprintf("Failed to update root node name for mindmap %d: %v", mindmap.ID, err))
+			nm.logger.LogError(context.Background(), fmt.Errorf("Failed to update root node name for mindmap %d: %v", mindmap.ID, err))
 		}
 	}
 }
@@ -201,11 +203,11 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 		if len(parentNodes) == 0 {
 			return 0, 0, fmt.Errorf("parent node not found: ID %d", nodeInfo.ParentID)
 		}
-		fmt.Println("DEBUG: Parent node found: ", parentNodes[0])
-		nm.logger.LogCommand(fmt.Sprintf("DEBUG: Parent node found: %+v", parentNodes[0]))
+		nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Parent node found: ", parentNodes[0]))
+		nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Parent node found: %+v", parentNodes[0]))
 	}
 
-	fmt.Println("DEBUG: NodeAdd Validation complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: NodeAdd Validation complete"))
 
 	// Count nodes with the same name
 	existingNodes, err := nm.nodeStore.NodeGet(mindmap, nodeInfo, model.NodeFilter{Name: true})
@@ -218,7 +220,7 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 			copies++
 		}
 	}
-	fmt.Println("DEBUG: NodeAdd Count complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: NodeAdd Count complete"))
 
 	// Assign index
 	if nodeInfo.ParentID == -1 {
@@ -257,7 +259,7 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 			nodeInfo.Index = fmt.Sprintf("%s.%d", parentNode.Index, highestIndex+1)
 		}
 	}
-	fmt.Println("DEBUG: Index calc complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Index calc complete"))
 
 	// Add to storage
 	var newID int
@@ -271,7 +273,7 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 		return newID, copies, fmt.Errorf("failed to add node to storage: %w", err)
 	}
 	copies++
-	fmt.Println("DEBUG: Storage add complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Storage add complete"))
 
 	// Get the newly created node
 	newNodes, err := nm.nodeStore.NodeGet(mindmap, model.NodeInfo{ID: newID}, model.NodeFilter{ID: true})
@@ -289,7 +291,7 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 		parentNode.Children = append(parentNode.Children, newNode)
 	}
 
-	fmt.Println("DEBUG: Update complete, newNode: ", newNode)
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Update complete, newNode: %v\n", newNode))
 
 	// Initialize the Nodes map if it's nil, sure case root node for a new mindmap
 	if mindmap.Nodes == nil {
@@ -297,14 +299,14 @@ func (nm *NodeManager) NodeAdd(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 	}
 	mindmap.Nodes[newID] = newNode
 
-	fmt.Println("DEBUG: initialized node map with root node complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: initialized node map with root node complete"))
 
 	// Set mindmap Root node if the new node is root
 	if newID == 0 {
 		mindmap.Root = newNode
 	}
 
-	fmt.Println("DEBUG: Set root node complete")
+	nm.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: Set root node complete"))
 
 	return newID, copies, nil
 }
@@ -317,12 +319,12 @@ func (nm *NodeManager) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, 
 
 	nodes, err := nm.nodeStore.NodeGet(mindmap, nodeInfo, nodeFilter)
 	if err != nil {
-		nm.logger.LogCommand(fmt.Sprintf("Failed to get nodes: %v", err))
+		nm.logger.LogCommand(context.Background(), fmt.Sprintf("Failed to get nodes: %v", err))
 		return nil, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
 	if len(nodes) == 0 {
-		nm.logger.LogCommand(fmt.Sprintf("No nodes found for filter: %+v", nodeFilter))
+		nm.logger.LogInfo(context.Background(), fmt.Sprintf("No nodes found for filter: %+v", nodeFilter))
 	}
 
 	return nodes, nil

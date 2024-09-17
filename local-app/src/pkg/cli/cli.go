@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"mindnoscape/local-app/src/pkg/adapter"
-	"mindnoscape/local-app/src/pkg/model"
+	"mindnoscape/local-app/src/pkg/log"
 	"os"
 	"strings"
+
+	"mindnoscape/local-app/src/pkg/adapter"
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // CLI represents the command-line interface
@@ -15,15 +18,17 @@ type CLI struct {
 	stopCh  chan struct{}
 	reader  io.Reader
 	writer  io.Writer
+	logger  *log.Logger
 }
 
 // NewCLI creates a new CLI instance
-func NewCLI(adapter adapter.AdapterInstance) (*CLI, error) {
+func NewCLI(adapter adapter.AdapterInstance, logger *log.Logger) (*CLI, error) {
 	return &CLI{
 		adapter: adapter,
 		stopCh:  make(chan struct{}),
 		reader:  os.Stdin,
 		writer:  os.Stdout,
+		logger:  logger,
 	}, nil
 }
 
@@ -41,7 +46,7 @@ func (c *CLI) Run() error {
 		}
 	}()
 
-	fmt.Println("DEBUG: CLI adapter started")
+	c.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: CLI adapter started"))
 
 	// Main loop
 	for {
@@ -52,6 +57,7 @@ func (c *CLI) Run() error {
 				break
 			}
 			fmt.Printf("Error reading input: %v\n", err)
+			c.logger.LogInfo(context.Background(), fmt.Sprintf("Error reading input: %v\n", err))
 			continue
 		}
 
@@ -63,6 +69,7 @@ func (c *CLI) Run() error {
 		cmd, err := c.parseCommand(input)
 		if err != nil {
 			fmt.Printf("Error parsing command: %v\n", err)
+			c.logger.LogInfo(context.Background(), fmt.Sprintf("Error parsing command: %v\n", err))
 			continue
 		}
 

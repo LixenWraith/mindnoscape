@@ -2,8 +2,9 @@ package storage
 
 import (
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"time"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // UserStore defines the interface for user-related storage operations.

@@ -5,9 +5,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"os"
 	"path/filepath"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // Global variables to store the current configuration and its file path.
@@ -31,9 +32,10 @@ func ConfigLoad() error {
 			DatabaseDir:         "./data",
 			DatabaseFile:        "mindnoscape.db",
 			DatabaseType:        "sqlite",
-			LogFolder:           "./log",
+			LogFolder:           "./logs",
 			CommandLog:          "commands.log",
 			ErrorLog:            "errors.log",
+			InfoLog:             "info.log",
 			DefaultUser:         "a",
 			DefaultUserActive:   true,
 			DefaultUserPassword: "",

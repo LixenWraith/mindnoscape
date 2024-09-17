@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"mindnoscape/local-app/src/pkg/model"
 	"os"
 	"path/filepath"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // FileExport exports a mindmap to a file in the specified format (JSON or XML).
