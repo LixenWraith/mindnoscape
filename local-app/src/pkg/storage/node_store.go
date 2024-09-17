@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
 )
 
@@ -21,21 +23,32 @@ type NodeStore interface {
 // NodeStorage implements the NodeStore interface.
 type NodeStorage struct {
 	storage *Storage
+	logger  *log.Logger
 }
 
 // NewNodeStorage creates a new NodeStorage instance.
 func NewNodeStorage(storage *Storage) *NodeStorage {
-	return &NodeStorage{storage: storage}
+	return &NodeStorage{
+		storage: storage,
+		logger:  storage.logger,
+	}
 }
 
 // NodeAdd adds a new node to the database.
 func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo, forceID ...bool) (int, error) {
+	s.logger.Info(context.Background(), "Adding new node", log.Fields{
+		"mindmapID": mindmap.ID,
+		"nodeName":  newNodeInfo.Name,
+		"parentID":  newNodeInfo.ParentID,
+	})
+	
 	db := s.storage.GetDatabase()
 	now := time.Now()
 
 	// Start a transaction
 	err := db.Begin()
 	if err != nil {
+		s.logger.Error(context.Background(), "Failed to begin transaction", log.Fields{"error": err})
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer db.Rollback()
@@ -52,6 +65,7 @@ func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo
 		query := "INSERT INTO " + nodesTable + " (id, mindmap_id, parent_id, node_name, index_value, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)"
 		result, err = db.Exec(query, newNodeInfo.ID, mindmap.ID, newNodeInfo.ParentID, newNodeInfo.Name, newNodeInfo.Index, now, now)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to add node with forced ID", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": newNodeInfo.ID})
 			return 0, fmt.Errorf("failed to add node with forced ID: %w", err)
 		}
 	} else {
@@ -59,11 +73,13 @@ func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo
 		query := "INSERT INTO " + nodesTable + " (mindmap_id, parent_id, node_name, index_value, created, updated) VALUES (?, ?, ?, ?, ?, ?)"
 		result, err = db.Exec(query, mindmap.ID, newNodeInfo.ParentID, newNodeInfo.Name, newNodeInfo.Index, now, now)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to add node", log.Fields{"error": err, "mindmapID": mindmap.ID})
 			return 0, fmt.Errorf("failed to add node: %w", err)
 		}
 	}
 	id, err = result.LastInsertId()
 	if err != nil {
+		s.logger.Error(context.Background(), "Failed to get last insert ID", log.Fields{"error": err})
 		return 0, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
@@ -73,6 +89,7 @@ func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo
 		for key, value := range newNodeInfo.Content {
 			_, err = db.Exec(contentQuery, mindmap.ID, id, key, value)
 			if err != nil {
+				s.logger.Error(context.Background(), "Failed to add node content", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": id})
 				db.Rollback()
 				return 0, fmt.Errorf("failed to add node content: %w", err)
 			}
@@ -81,14 +98,18 @@ func (s *NodeStorage) NodeAdd(mindmap *model.Mindmap, newNodeInfo model.NodeInfo
 
 	// Commit the transaction
 	if err := db.Commit(); err != nil {
+		s.logger.Error(context.Background(), "Failed to commit transaction", log.Fields{"error": err})
 		return 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	s.logger.Info(context.Background(), "Node added successfully", log.Fields{"mindmapID": mindmap.ID, "nodeID": id})
 	return int(id), nil
 }
 
 // NodeGet retrieves nodes based on the provided info and filter.
 func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, nodeFilter model.NodeFilter) ([]*model.Node, error) {
+	s.logger.Info(context.Background(), "Retrieving nodes", log.Fields{"mindmap": mindmap, "nodeInfo": nodeInfo, "filter": nodeFilter})
+
 	db := s.storage.GetDatabase()
 
 	// Construct the table names safely
@@ -120,6 +141,7 @@ func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, n
 	// Query the db for node
 	rows, err := db.Query(query, args...)
 	if err != nil {
+		s.logger.Error(context.Background(), "Failed to query nodes", log.Fields{"error": err, "mindmapID": mindmap.ID})
 		return nil, fmt.Errorf("failed to query nodes: %w", err)
 	}
 	defer rows.Close()
@@ -130,6 +152,7 @@ func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, n
 		var n model.Node
 		err := rows.Scan(&n.ID, &n.ParentID, &n.Name, &n.Index, &n.Created, &n.Updated)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to scan node row", log.Fields{"error": err})
 			return nil, fmt.Errorf("failed to scan node row: %w", err)
 		}
 		n.MindmapID = mindmap.ID
@@ -138,6 +161,7 @@ func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, n
 	}
 
 	if err := rows.Err(); err != nil {
+		s.logger.Error(context.Background(), "Error iterating node rows", log.Fields{"error": err})
 		return nil, fmt.Errorf("error iterating node rows: %w", err)
 	}
 
@@ -146,6 +170,7 @@ func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, n
 		contentQuery := fmt.Sprintf("SELECT key, value FROM %s WHERE node_id = ?", contentTable)
 		contentRows, err := db.Query(contentQuery, mindmap.ID, node.ID)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to query node content", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 			return nil, fmt.Errorf("failed to query node content: %w", err)
 		}
 		defer contentRows.Close()
@@ -154,25 +179,31 @@ func (s *NodeStorage) NodeGet(mindmap *model.Mindmap, nodeInfo model.NodeInfo, n
 		for contentRows.Next() {
 			var key, value string
 			if err := contentRows.Scan(&key, &value); err != nil {
+				s.logger.Error(context.Background(), "Failed to scan content row", log.Fields{"error": err})
 				return nil, fmt.Errorf("failed to scan content row: %w", err)
 			}
 			node.Content[key] = value
 		}
 
 		if err := contentRows.Err(); err != nil {
+			s.logger.Error(context.Background(), "Error iterating content rows", log.Fields{"error": err})
 			return nil, fmt.Errorf("error iterating content rows: %w", err)
 		}
 	}
 
+	s.logger.Info(context.Background(), "Nodes retrieved successfully", log.Fields{"mindmapID": mindmap.ID, "nodeCount": len(nodes)})
 	return nodes, nil
 }
 
 // NodeUpdate updates an existing node in the database.
 func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeUpdateInfo model.NodeInfo, nodeUpdateFilter model.NodeFilter) error {
+	s.logger.Info(context.Background(), "Updating node", log.Fields{"mindmap": mindmap, "node": node, "updateInfo": nodeUpdateInfo, "filter": nodeUpdateFilter})
+
 	db := s.storage.GetDatabase()
 
 	var err error
 	if err = db.Begin(); err != nil {
+		s.logger.Error(context.Background(), "Failed to begin transaction", log.Fields{"error": err})
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer db.Rollback()
@@ -204,6 +235,7 @@ func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeU
 
 		_, err = db.Exec(query, args...)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to update node", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 			return fmt.Errorf("failed to update node: %w", err)
 		}
 	}
@@ -214,6 +246,7 @@ func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeU
 		deleteQuery := fmt.Sprintf("DELETE FROM node_content_%d WHERE node_id = ?", mindmap.ID)
 		_, err = db.Exec(deleteQuery, node.ID)
 		if err != nil {
+			s.logger.Error(context.Background(), "Failed to delete existing node content", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 			return fmt.Errorf("failed to delete existing node content: %w", err)
 		}
 
@@ -223,20 +256,31 @@ func (s *NodeStorage) NodeUpdate(mindmap *model.Mindmap, node *model.Node, nodeU
 			for key, value := range nodeUpdateInfo.Content {
 				_, err = db.Exec(insertQuery, node.ID, key, value)
 				if err != nil {
+					s.logger.Error(context.Background(), "Failed to insert new node content", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 					return fmt.Errorf("failed to insert new node content: %w", err)
 				}
 			}
 		}
 	}
 
-	return db.Commit()
+	err = db.Commit()
+	if err != nil {
+		s.logger.Error(context.Background(), "Failed to commit transaction", log.Fields{"error": err})
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.logger.Info(context.Background(), "Node updated successfully", log.Fields{"mindmapID": mindmap.ID, "nodeID": node.ID})
+	return nil
 }
 
 // NodeDelete removes a node from the database.
 func (s *NodeStorage) NodeDelete(mindmap *model.Mindmap, node *model.Node) error {
+	s.logger.Info(context.Background(), "Deleting node", log.Fields{"mindmap": mindmap, "node": node})
+
 	db := s.storage.GetDatabase()
 
 	if err := db.Begin(); err != nil {
+		s.logger.Error(context.Background(), "Failed to begin transaction", log.Fields{"error": err})
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer db.Rollback()
@@ -245,6 +289,7 @@ func (s *NodeStorage) NodeDelete(mindmap *model.Mindmap, node *model.Node) error
 	contentQuery := "DELETE FROM node_content_? WHERE node_id = ?"
 	_, err := db.Exec(contentQuery, mindmap.ID, node.ID)
 	if err != nil {
+		s.logger.Error(context.Background(), "Failed to delete node content", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 		return fmt.Errorf("failed to delete node content: %w", err)
 	}
 
@@ -252,12 +297,15 @@ func (s *NodeStorage) NodeDelete(mindmap *model.Mindmap, node *model.Node) error
 	nodeQuery := "DELETE FROM nodes_? WHERE id = ?"
 	_, err = db.Exec(nodeQuery, mindmap.ID, node.ID)
 	if err != nil {
+		s.logger.Error(context.Background(), "Failed to delete node", log.Fields{"error": err, "mindmapID": mindmap.ID, "nodeID": node.ID})
 		return fmt.Errorf("failed to delete node: %w", err)
 	}
 
 	if err := db.Commit(); err != nil {
+		s.logger.Error(context.Background(), "Failed to commit transaction", log.Fields{"error": err})
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	s.logger.Info(context.Background(), "Node deleted successfully", log.Fields{"mindmapID": mindmap.ID, "nodeID": node.ID})
 	return nil
 }

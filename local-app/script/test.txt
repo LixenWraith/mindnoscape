@@ -1,0 +1,28 @@
+user select a
+mindmap list
+mindmap delete
+mindmap add day
+mindmap list
+mindmap select 1
+node add 0 hello
+node add 0 world
+node add 1 tim h:170cm
+node add 0 sky
+node add 1 jim h:180cm
+node add 2 earth
+node add 0 boom
+node add 3 doom
+node add 1.2 alice h:90cm
+node add 1.2 claire h:130cm
+mindmap view --id
+mindmap select
+mindmap permission 1 public
+mindmap add night
+mindmap list
+mindmap select 2
+mindmap view --id
+mindmap permission night public --name
+mindmap list
+user add admin
+user select admin
+mindmap list

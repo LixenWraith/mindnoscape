@@ -1,6 +1,6 @@
 dev/
 local-app/.idea
-local-app/log
+local-app/logs
 local-app/data
 
 

@@ -1,21 +1,29 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
 )
 
+// handleNodeAdd handles the node add command
 func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node add command", log.Fields{"args": cmd.Args})
+
 	if len(cmd.Args) < 2 {
+		s.logger.Error(ctx, "Insufficient arguments for node add", log.Fields{"argCount": len(cmd.Args)})
 		return nil, errors.New("node add command requires at least 2 arguments: <parent> <content> [<extra field label>:<extra field value>]... [--id]")
 	}
 
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
@@ -33,8 +41,11 @@ func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {
 		}
 	}
 
+	s.logger.Debug(ctx, "Parsing node add arguments", log.Fields{"parentIdentifier": parentIdentifier, "content": content, "useID": useID, "extraFields": extraFields})
+
 	parentNode, err := getNode(s, currentMindmap, parentIdentifier, useID)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to get parent node", log.Fields{"error": err, "parentIdentifier": parentIdentifier})
 		return nil, fmt.Errorf("failed to get parent node: %w", err)
 	}
 
@@ -45,21 +56,30 @@ func handleNodeAdd(s *Session, cmd model.Command) (interface{}, error) {
 		Content:   extraFields,
 	}
 
+	s.logger.Debug(ctx, "Adding new node", log.Fields{"parentID": parentNode.ID, "content": content})
 	nodeID, _, err := s.DataManager.NodeManager.NodeAdd(currentMindmap, newNode)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to add node", log.Fields{"error": err})
 		return nil, fmt.Errorf("failed to add node: %w", err)
 	}
 
+	s.logger.Info(ctx, "Node added successfully", log.Fields{"nodeID": nodeID})
 	return nodeID, nil
 }
 
+// handleNodeUpdate handles the node update command
 func handleNodeUpdate(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node update command", log.Fields{"args": cmd.Args})
+
 	if len(cmd.Args) < 2 {
+		s.logger.Error(ctx, "Insufficient arguments for node update", log.Fields{"argCount": len(cmd.Args)})
 		return nil, errors.New("node update command requires at least 2 arguments: <node> <content> [<extra field label>:<extra field value>]... [--id]")
 	}
 
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
@@ -77,6 +97,8 @@ func handleNodeUpdate(s *Session, cmd model.Command) (interface{}, error) {
 		}
 	}
 
+	s.logger.Debug(ctx, "Parsing node update arguments", log.Fields{"nodeIdentifier": nodeIdentifier, "content": content, "useID": useID, "extraFields": extraFields})
+
 	node, err := getNode(s, currentMindmap, nodeIdentifier, useID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node: %w", err)
@@ -87,21 +109,30 @@ func handleNodeUpdate(s *Session, cmd model.Command) (interface{}, error) {
 		Content: extraFields,
 	}
 
+	s.logger.Debug(ctx, "Updating node", log.Fields{"nodeID": node.ID, "newContent": content})
 	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, node, updateInfo, model.NodeFilter{Name: true, Content: true})
 	if err != nil {
+		s.logger.Error(ctx, "Failed to update node", log.Fields{"error": err, "nodeID": node.ID})
 		return nil, fmt.Errorf("failed to update node: %w", err)
 	}
 
+	s.logger.Info(ctx, "Node updated successfully", log.Fields{"nodeID": node.ID})
 	return nil, nil
 }
 
+// handleNodeMove handles the node move command
 func handleNodeMove(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node move command", log.Fields{"args": cmd.Args})
+
 	if len(cmd.Args) < 2 || len(cmd.Args) > 3 {
+		s.logger.Error(ctx, "Invalid number of arguments for node move", log.Fields{"argCount": len(cmd.Args)})
 		return nil, errors.New("node move command requires 2 or 3 arguments: <source> <target> [--id]")
 	}
 
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
@@ -109,13 +140,17 @@ func handleNodeMove(s *Session, cmd model.Command) (interface{}, error) {
 	targetIdentifier := cmd.Args[1]
 	useID := len(cmd.Args) == 3 && cmd.Args[2] == "--id"
 
+	s.logger.Debug(ctx, "Parsing node move arguments", log.Fields{"sourceIdentifier": sourceIdentifier, "targetIdentifier": targetIdentifier, "useID": useID})
+
 	sourceNode, err := getNode(s, currentMindmap, sourceIdentifier, useID)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to get source node", log.Fields{"error": err, "sourceIdentifier": sourceIdentifier})
 		return nil, fmt.Errorf("failed to get source node: %w", err)
 	}
 
 	targetNode, err := getNode(s, currentMindmap, targetIdentifier, useID)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to get target node", log.Fields{"error": err, "targetIdentifier": targetIdentifier})
 		return nil, fmt.Errorf("failed to get target node: %w", err)
 	}
 
@@ -123,55 +158,78 @@ func handleNodeMove(s *Session, cmd model.Command) (interface{}, error) {
 		ParentID: targetNode.ID,
 	}
 
+	s.logger.Debug(ctx, "Moving node", log.Fields{"sourceNodeID": sourceNode.ID, "targetNodeID": targetNode.ID})
 	err = s.DataManager.NodeManager.NodeUpdate(currentMindmap, sourceNode, updateInfo, model.NodeFilter{ParentID: true})
 	if err != nil {
+		s.logger.Error(ctx, "Failed to move node", log.Fields{"error": err, "sourceNodeID": sourceNode.ID, "targetNodeID": targetNode.ID})
 		return nil, fmt.Errorf("failed to move node: %w", err)
 	}
 
+	s.logger.Info(ctx, "Node moved successfully", log.Fields{"sourceNodeID": sourceNode.ID, "targetNodeID": targetNode.ID})
 	return nil, nil
 }
 
+// handleNodeDelete handles the node delete command
 func handleNodeDelete(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node delete command", log.Fields{"args": cmd.Args})
+
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
+		s.logger.Error(ctx, "Invalid number of arguments for node delete", log.Fields{"argCount": len(cmd.Args)})
 		return nil, errors.New("node delete command requires 1 or 2 arguments: <node> [--id]")
 	}
 
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
 	nodeIdentifier := cmd.Args[0]
 	useID := len(cmd.Args) == 2 && cmd.Args[1] == "--id"
 
+	s.logger.Debug(ctx, "Parsing node delete arguments", log.Fields{"nodeIdentifier": nodeIdentifier, "useID": useID})
+
 	node, err := getNode(s, currentMindmap, nodeIdentifier, useID)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to get node", log.Fields{"error": err, "nodeIdentifier": nodeIdentifier})
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
+	s.logger.Debug(ctx, "Deleting node", log.Fields{"nodeID": node.ID})
 	err = s.DataManager.NodeManager.NodeDelete(currentMindmap, node)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to delete node", log.Fields{"error": err, "nodeID": node.ID})
 		return nil, fmt.Errorf("failed to delete node: %w", err)
 	}
 
+	s.logger.Info(ctx, "Node deleted successfully", log.Fields{"nodeID": node.ID})
 	return nil, nil
 }
 
+// handleNodeFind handles the node find command
 func handleNodeFind(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node find command", log.Fields{"args": cmd.Args})
+
 	if len(cmd.Args) < 1 || len(cmd.Args) > 2 {
+		s.logger.Error(ctx, "Invalid number of arguments for node find", log.Fields{"argCount": len(cmd.Args)})
 		return nil, errors.New("node find command requires 1 or 2 arguments: <query> [--id]")
 	}
 
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
 	query := cmd.Args[0]
 	showID := len(cmd.Args) == 2 && cmd.Args[1] == "--id"
 
+	s.logger.Debug(ctx, "Searching for nodes", log.Fields{"query": query, "showID": showID})
 	nodes, err := s.DataManager.NodeManager.NodeFind(currentMindmap, model.NodeFilter{Name: true, Content: true}, query)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to find nodes", log.Fields{"error": err, "query": query})
 		return nil, fmt.Errorf("failed to find nodes: %w", err)
 	}
 
@@ -185,12 +243,18 @@ func handleNodeFind(s *Session, cmd model.Command) (interface{}, error) {
 		}
 	}
 
+	s.logger.Info(ctx, "Nodes found", log.Fields{"count": len(nodes)})
 	return results, nil
 }
 
+// handleNodeSort handles the node sort command
 func handleNodeSort(s *Session, cmd model.Command) (interface{}, error) {
+	ctx := context.Background()
+	s.logger.Info(ctx, "Handling node sort command", log.Fields{"args": cmd.Args})
+
 	currentMindmap, err := s.MindmapGet()
 	if err != nil {
+		s.logger.Error(ctx, "No mindmap selected", log.Fields{"error": err})
 		return nil, fmt.Errorf("no mindmap selected: %w", err)
 	}
 
@@ -204,6 +268,7 @@ func handleNodeSort(s *Session, cmd model.Command) (interface{}, error) {
 		case i == 0 && arg != "--reverse" && arg != "--id":
 			parentNode, err = getNode(s, currentMindmap, arg, useID)
 			if err != nil {
+				s.logger.Error(ctx, "Failed to get parent node", log.Fields{"error": err, "arg": arg})
 				return nil, fmt.Errorf("failed to get parent node: %w", err)
 			}
 		case arg == "--reverse":
@@ -219,22 +284,29 @@ func handleNodeSort(s *Session, cmd model.Command) (interface{}, error) {
 		parentNode = currentMindmap.Root
 	}
 
+	s.logger.Debug(ctx, "Sorting nodes", log.Fields{"parentNodeID": parentNode.ID, "field": field, "reverse": reverse})
 	err = s.DataManager.NodeManager.NodeSort(currentMindmap, s.DataManager.NodeManager.NodeToInfo(parentNode), field, reverse)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to sort nodes", log.Fields{"error": err, "parentNodeID": parentNode.ID})
 		return nil, fmt.Errorf("failed to sort nodes: %w", err)
 	}
 
+	s.logger.Info(ctx, "Nodes sorted successfully", log.Fields{"parentNodeID": parentNode.ID})
 	return nil, nil
 }
 
 // getNode is a helper function to get a node by its identifier (index or ID)
 func getNode(s *Session, mindmap *model.Mindmap, identifier string, useID bool) (*model.Node, error) {
+	ctx := context.Background()
+	s.logger.Debug(ctx, "Getting node", log.Fields{"identifier": identifier, "useID": useID})
+
 	var nodeInfo model.NodeInfo
 	var nodeFilter model.NodeFilter
 
 	if useID {
 		id, err := strconv.Atoi(identifier)
 		if err != nil {
+			s.logger.Error(ctx, "Invalid node ID", log.Fields{"identifier": identifier, "error": err})
 			return nil, fmt.Errorf("invalid node ID: %s", identifier)
 		}
 		nodeInfo.ID = id
@@ -246,10 +318,13 @@ func getNode(s *Session, mindmap *model.Mindmap, identifier string, useID bool) 
 
 	nodes, err := s.DataManager.NodeManager.NodeGet(mindmap, nodeInfo, nodeFilter)
 	if err != nil {
+		s.logger.Error(ctx, "Failed to get node", log.Fields{"error": err, "identifier": identifier})
 		return nil, err
 	}
 	if len(nodes) == 0 {
+		s.logger.Warn(ctx, "Node not found", log.Fields{"identifier": identifier})
 		return nil, fmt.Errorf("node not found: %s", identifier)
 	}
+	s.logger.Debug(ctx, "Node retrieved successfully", log.Fields{"nodeID": nodes[0].ID})
 	return nodes[0], nil
 }

@@ -40,85 +40,85 @@ func main() {
 	cfg := config.ConfigGet()
 
 	// Initialize logger with new info logging
-	logger, err := log.NewLogger(cfg, true) // Enable info logging
+	logger, err := log.NewLogger(cfg, log.LevelInfo)
 	if err != nil {
 		fmt.Printf("Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
 		if err := logger.Close(); err != nil {
-			fmt.Printf("Failed to close logger: %v\n", err)
+			logger.Error(context.Background(), "Failed to close logger", log.Fields{"error": err})
 		}
 	}()
 
-	logger.LogInfo(context.Background(), fmt.Sprintf("Application started", map[string]interface{}{"config": cfg}))
+	logger.Info(context.Background(), "Application started", log.Fields{"config": cfg})
 
 	// Initialize storage config
-	store, err := storage.NewStorage(cfg)
+	store, err := storage.NewStorage(cfg, logger)
 	if err != nil {
-		logger.LogError(context.Background(), fmt.Errorf("failed to initialize storage: %w", err))
+		logger.Error(context.Background(), "Failed to initialize storage", log.Fields{"error": err})
 		os.Exit(1)
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
-			logger.LogError(context.Background(), fmt.Errorf("failed to close storage: %w", err))
+			logger.Error(context.Background(), "Failed to close storage", log.Fields{"error": err})
 		}
 	}()
 
-	logger.LogInfo(context.Background(), "Storage initialized")
+	logger.Info(context.Background(), "Storage initialized", nil)
 
 	// Initialize data manager
 	dataManager, err := data.NewDataManager(store, cfg, logger)
 	if err != nil {
-		logger.LogError(context.Background(), fmt.Errorf("failed to initialize data manager: %w", err))
+		logger.Error(context.Background(), "Failed to initialize data manager", log.Fields{"error": err})
 		os.Exit(1)
 	}
 
-	logger.LogInfo(context.Background(), "Data manager initialized")
+	logger.Info(context.Background(), "Data manager initialized", nil)
 
 	// Initialize session manager
 	sessionManager := session.NewSessionManager(dataManager, logger)
 	defer sessionManager.StopCleanupRoutine()
 
-	logger.LogInfo(context.Background(), "Session manager initialized")
+	logger.Info(context.Background(), "Session manager initialized", nil)
 
 	// Initialize adapter manager
 	adapterManager := adapter.NewAdapterManager(sessionManager, logger)
 	defer adapterManager.Shutdown()
 
-	logger.LogInfo(context.Background(), "Adapter manager initialized")
+	logger.Info(context.Background(), "Adapter manager initialized", nil)
 
 	// Initialize cli adapter
 	cliAdapter, err := adapter.NewCLIAdapter(sessionManager, logger)
 	if err != nil {
-		logger.LogError(context.Background(), fmt.Errorf("failed to initialize CLI adapter: %w", err))
+		logger.Error(context.Background(), "Failed to initialize CLI adapter", log.Fields{"error": err})
 		os.Exit(1)
 	}
 
-	logger.LogInfo(context.Background(), "CLI adapter initialized")
+	logger.Info(context.Background(), "CLI adapter initialized", nil)
 
 	// Create and run CLI
 	cliInstance, err := cli.NewCLI(cliAdapter, logger)
 	if err != nil {
-		logger.LogError(context.Background(), fmt.Errorf("failed to initiate CLI: %w", err))
+		logger.Error(context.Background(), "Failed to initiate CLI", log.Fields{"error": err})
 		os.Exit(1)
 	}
 
-	logger.LogInfo(context.Background(), "CLI instance created")
+	logger.Info(context.Background(), "CLI instance created", nil)
 
 	// Set up graceful shutdown
 	go func() {
 		<-sigChan
-		logger.LogInfo(context.Background(), "Received interrupt signal. Shutting down...")
+		logger.Info(context.Background(), "Received interrupt signal. Shutting down...", nil)
 		fmt.Println("\nReceived interrupt signal. Shutting down...")
 		cliInstance.Stop()
 	}()
 
 	// Run CLI
 	if err := cliInstance.Run(); err != nil {
-		logger.LogError(context.Background(), fmt.Errorf("CLI error: %w", err))
+		logger.Error(context.Background(), "CLI error", log.Fields{"error": err})
 	}
 
-	logger.LogInfo(context.Background(), "Application shutting down")
+	logger.Info(context.Background(), "Application shutting down", nil)
 	fmt.Println("Goodbye!")
 }

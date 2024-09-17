@@ -5,16 +5,21 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"mindnoscape/local-app/src/pkg/model"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"mindnoscape/local-app/src/pkg/model"
 )
+
+// Fields represents a map of additional information for log entries
+type Fields map[string]interface{}
 
 // LogMessage represents a message to be logged
 type LogMessage struct {
-	Type    string // "command", "error", or "info"
+	Level   LogLevel
 	Content string
+	Fields  Fields
 	Context context.Context
 }
 
@@ -29,11 +34,11 @@ type Logger struct {
 	logChan       chan LogMessage
 	done          chan struct{}
 	wg            sync.WaitGroup
-	infoEnabled   bool // Flag to enable/disable info logging
+	level         LogLevel
 }
 
 // NewLogger creates a new Logger instance with specified log folder and file names
-func NewLogger(cfg *model.Config, infoEnabled bool) (*Logger, error) {
+func NewLogger(cfg *model.Config, level LogLevel) (*Logger, error) {
 	// Create log directory if it doesn't exist
 	if err := os.MkdirAll(cfg.LogFolder, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
@@ -64,15 +69,9 @@ func NewLogger(cfg *model.Config, infoEnabled bool) (*Logger, error) {
 	}
 
 	// Create slog loggers
-	commandLogger := slog.New(slog.NewJSONHandler(commandFile, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	errorLogger := slog.New(slog.NewJSONHandler(errorFile, &slog.HandlerOptions{
-		Level: slog.LevelError,
-	}))
-	infoLogger := slog.New(slog.NewJSONHandler(infoFile, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	commandLogger := slog.New(slog.NewJSONHandler(commandFile, &slog.HandlerOptions{Level: LevelCommand.toSlogLevel()}))
+	errorLogger := slog.New(slog.NewJSONHandler(errorFile, &slog.HandlerOptions{Level: LevelWarn.toSlogLevel()}))
+	infoLogger := slog.New(slog.NewJSONHandler(infoFile, &slog.HandlerOptions{Level: LevelDebug.toSlogLevel()}))
 
 	logger := &Logger{
 		commandLogger: commandLogger,
@@ -83,7 +82,7 @@ func NewLogger(cfg *model.Config, infoEnabled bool) (*Logger, error) {
 		infoFile:      infoFile,
 		logChan:       make(chan LogMessage, 100), // Buffered channel with capacity of 100
 		done:          make(chan struct{}),
-		infoEnabled:   infoEnabled,
+		level:         level,
 	}
 
 	// Start the logging goroutine
@@ -99,15 +98,17 @@ func (l *Logger) processLogs() {
 	for {
 		select {
 		case msg := <-l.logChan:
-			switch msg.Type {
-			case "command":
-				l.commandLogger.InfoContext(msg.Context, msg.Content)
-			case "error":
-				l.errorLogger.ErrorContext(msg.Context, msg.Content)
-			case "info":
-				if l.infoEnabled {
-					l.infoLogger.DebugContext(msg.Context, msg.Content)
-				}
+			attrs := make([]slog.Attr, 0, len(msg.Fields))
+			for k, v := range msg.Fields {
+				attrs = append(attrs, slog.Any(k, v))
+			}
+			switch msg.Level {
+			case LevelCommand:
+				l.commandLogger.LogAttrs(msg.Context, msg.Level.toSlogLevel(), msg.Content, attrs...)
+			case LevelError, LevelWarn:
+				l.errorLogger.LogAttrs(msg.Context, msg.Level.toSlogLevel(), msg.Content, attrs...)
+			case LevelInfo, LevelDebug:
+				l.infoLogger.LogAttrs(msg.Context, msg.Level.toSlogLevel(), msg.Content, attrs...)
 			}
 		case <-l.done:
 			return
@@ -115,23 +116,34 @@ func (l *Logger) processLogs() {
 	}
 }
 
-func (l *Logger) LogCommand(ctx context.Context, command string) {
-	l.logChan <- LogMessage{Type: "command", Content: command, Context: ctx}
+// Command logs a command message
+func (l *Logger) Command(ctx context.Context, message string, fields Fields) {
+	l.logChan <- LogMessage{Level: LevelCommand, Content: message, Fields: fields, Context: ctx}
 }
 
-func (l *Logger) LogError(ctx context.Context, err error) {
-	l.logChan <- LogMessage{Type: "error", Content: err.Error(), Context: ctx}
+// Error logs an error message
+func (l *Logger) Error(ctx context.Context, message string, fields Fields) {
+	l.logChan <- LogMessage{Level: LevelError, Content: message, Fields: fields, Context: ctx}
 }
 
-func (l *Logger) LogInfo(ctx context.Context, message string) {
-	if l.infoEnabled {
-		l.logChan <- LogMessage{Type: "info", Content: message, Context: ctx}
-	}
+// Warn logs a warning message
+func (l *Logger) Warn(ctx context.Context, message string, fields Fields) {
+	l.logChan <- LogMessage{Level: LevelWarn, Content: message, Fields: fields, Context: ctx}
 }
 
-// SetInfoEnabled enables or disables info logging
-func (l *Logger) SetInfoEnabled(enabled bool) {
-	l.infoEnabled = enabled
+// Info logs an info message
+func (l *Logger) Info(ctx context.Context, message string, fields Fields) {
+	l.logChan <- LogMessage{Level: LevelInfo, Content: message, Fields: fields, Context: ctx}
+}
+
+// Debug logs a debug message
+func (l *Logger) Debug(ctx context.Context, message string, fields Fields) {
+	l.logChan <- LogMessage{Level: LevelDebug, Content: message, Fields: fields, Context: ctx}
+}
+
+// SetLevel sets the logging level
+func (l *Logger) SetLevel(level LogLevel) {
+	l.level = level
 }
 
 // Close stops the logging goroutine and closes all log files

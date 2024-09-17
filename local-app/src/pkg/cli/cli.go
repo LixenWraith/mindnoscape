@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"mindnoscape/local-app/src/pkg/log"
 	"os"
 	"strings"
 
 	"mindnoscape/local-app/src/pkg/adapter"
+	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
 )
 
@@ -23,13 +23,15 @@ type CLI struct {
 
 // NewCLI creates a new CLI instance
 func NewCLI(adapter adapter.AdapterInstance, logger *log.Logger) (*CLI, error) {
-	return &CLI{
+	cli := &CLI{
 		adapter: adapter,
 		stopCh:  make(chan struct{}),
 		reader:  os.Stdin,
 		writer:  os.Stdout,
 		logger:  logger,
-	}, nil
+	}
+	logger.Info(context.Background(), "CLI instance created", nil)
+	return cli, nil
 }
 
 // Run starts the CLI and handles user input
@@ -38,15 +40,16 @@ func (c *CLI) Run() error {
 	fmt.Println("Type 'help' for a list of commands or 'exit' to quit.")
 
 	if err := c.adapter.AdapterStart(); err != nil {
+		c.logger.Error(context.Background(), "Failed to start CLI adapter", log.Fields{"error": err})
 		return fmt.Errorf("failed to start CLI adapter: %w", err)
 	}
 	defer func() {
 		if err := c.adapter.AdapterStop(); err != nil {
-			fmt.Printf("Error stopping CLI adapter: %v\n", err)
+			c.logger.Error(context.Background(), "Error stopping CLI adapter", log.Fields{"error": err})
 		}
 	}()
 
-	c.logger.LogInfo(context.Background(), fmt.Sprintf("DEBUG: CLI adapter started"))
+	c.logger.Info(context.Background(), "CLI adapter started", nil)
 
 	// Main loop
 	for {
@@ -56,8 +59,8 @@ func (c *CLI) Run() error {
 			if err == io.EOF {
 				break
 			}
+			c.logger.Error(context.Background(), "Error reading input", log.Fields{"error": err})
 			fmt.Printf("Error reading input: %v\n", err)
-			c.logger.LogInfo(context.Background(), fmt.Sprintf("Error reading input: %v\n", err))
 			continue
 		}
 
@@ -68,14 +71,13 @@ func (c *CLI) Run() error {
 		// Parse input into model.Command
 		cmd, err := c.parseCommand(input)
 		if err != nil {
+			c.logger.Error(context.Background(), "Error parsing command", log.Fields{"error": err, "input": input})
 			fmt.Printf("Error parsing command: %v\n", err)
-			c.logger.LogInfo(context.Background(), fmt.Sprintf("Error parsing command: %v\n", err))
 			continue
 		}
 
 		// Check for help command
 		if cmd.Scope == "help" {
-			// Split input into words
 			args := strings.Fields(input)
 			if len(args) == 0 { // General help
 				c.printHelp(nil)
@@ -88,12 +90,17 @@ func (c *CLI) Run() error {
 		// Pass command to the adapter
 		result, err := c.adapter.CommandProcess(cmd)
 		if err != nil {
+			c.logger.Error(context.Background(), "Command processing error", log.Fields{"error": err, "command": cmd})
 			fmt.Printf("Error: %v\n", err)
-		} else if result != nil {
-			fmt.Printf("Result: %v\n", result)
+		} else {
+			c.logger.Info(context.Background(), "Command processed successfully", log.Fields{"command": cmd, "result": result})
+			if result != nil {
+				fmt.Printf("Result: %v\n", result)
+			}
 		}
 	}
 
+	c.logger.Info(context.Background(), "CLI stopped", nil)
 	return nil
 }
 
@@ -122,6 +129,7 @@ func (c *CLI) readLine() (string, error) {
 // Stop signals the CLI to stop its main loop
 func (c *CLI) Stop() {
 	close(c.stopCh)
+	c.logger.Info(context.Background(), "CLI stop signal received", nil)
 }
 
 // parseCommand parses user input into a model.Command
@@ -142,11 +150,13 @@ func (c *CLI) parseCommand(input string) (model.Command, error) {
 		cmd.Args = args[2:]
 	}
 
+	c.logger.Info(context.Background(), "Command parsed", log.Fields{"command": cmd})
 	return cmd, nil
 }
 
 // printHelp prints the help message based on the provided arguments
 func (c *CLI) printHelp(args []string) {
+	c.logger.Info(context.Background(), "Printing help", log.Fields{"args": args})
 	switch len(args) {
 	case 0:
 		c.showGeneralHelp()
@@ -161,6 +171,7 @@ func (c *CLI) printHelp(args []string) {
 
 // showGeneralHelp displays an overview of all available commands grouped by scope
 func (c *CLI) showGeneralHelp() {
+	c.logger.Info(context.Background(), "Showing general help", nil)
 	fmt.Println("Command syntax: <scope> [operation] [arguments] [options]")
 	fmt.Println("\nAvailable commands:")
 	currentScope := ""
@@ -175,6 +186,7 @@ func (c *CLI) showGeneralHelp() {
 
 // showScopeHelp displays help information for all commands within a specific scope
 func (c *CLI) showScopeHelp(scope string) {
+	c.logger.Info(context.Background(), "Showing scope help", log.Fields{"scope": scope})
 	fmt.Printf("Commands for %s:\n\n", scope)
 	for _, cmd := range commandHelps {
 		if cmd.Scope == scope {
@@ -185,6 +197,7 @@ func (c *CLI) showScopeHelp(scope string) {
 
 // showOperationHelp displays detailed help information for a specific operation within a scope
 func (c *CLI) showOperationHelp(scope, operation string) {
+	c.logger.Info(context.Background(), "Showing operation help", log.Fields{"scope": scope, "operation": operation})
 	for _, cmd := range commandHelps {
 		if cmd.Scope == scope && cmd.Operation == operation {
 			fmt.Printf("Command: %s %s\n", scope, operation)
@@ -211,6 +224,7 @@ func (c *CLI) showOperationHelp(scope, operation string) {
 			return
 		}
 	}
+	c.logger.Warn(context.Background(), "No help found for command", log.Fields{"scope": scope, "operation": operation})
 	fmt.Printf("No help found for %s %s\n", scope, operation)
 }
 

@@ -1,10 +1,11 @@
 package adapter
 
 import (
+	"context"
 	"fmt"
-	"mindnoscape/local-app/src/pkg/log"
 	"sync"
 
+	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
 	"mindnoscape/local-app/src/pkg/session"
 )
@@ -61,6 +62,7 @@ func NewAdapterManager(sm *session.SessionManager, logger *log.Logger) *AdapterM
 		logger:         logger,
 	}
 	go am.commandHandler()
+	am.logger.Info(context.Background(), "AdapterManager initialized", nil)
 	return am
 }
 
@@ -69,18 +71,21 @@ func (am *AdapterManager) AdapterAdd(adapterType string) (string, error) {
 	// Check if a factory for the specified adapter type exists
 	factory, ok := am.factories[adapterType]
 	if !ok {
+		am.logger.Error(context.Background(), "Unknown adapter type", log.Fields{"adapterType": adapterType})
 		return "", fmt.Errorf("unknown adapter type: %s", adapterType)
 	}
 
 	// Create a new instance of the adapter using the factory
 	instance, err := factory()
 	if err != nil {
+		am.logger.Error(context.Background(), "Failed to create adapter instance", log.Fields{"adapterType": adapterType, "error": err})
 		return "", err
 	}
 
 	// Create a new session for this adapter instance
 	sessionID, err := am.sessionManager.SessionAdd()
 	if err != nil {
+		am.logger.Error(context.Background(), "Failed to add session", log.Fields{"error": err})
 		return "", fmt.Errorf("failed to add session: %w", err)
 	}
 
@@ -91,6 +96,7 @@ func (am *AdapterManager) AdapterAdd(adapterType string) (string, error) {
 	go am.instanceHandler(sessionID)
 
 	// Return the session ID associated with the new adapter instance
+	am.logger.Info(context.Background(), "Adapter instance added", log.Fields{"adapterType": adapterType, "sessionID": sessionID})
 	return sessionID, nil
 }
 
@@ -100,8 +106,10 @@ func (am *AdapterManager) CommandRun(sessionID string, cmd model.Command) (inter
 	am.cmdChan <- commandRequest{SessionID: sessionID, Command: cmd, ResultChan: resultChan}
 	result := <-resultChan
 	if err, ok := result.(error); ok {
+		am.logger.Error(context.Background(), "Command execution failed", log.Fields{"sessionID": sessionID, "command": cmd, "error": err})
 		return nil, err
 	}
+	am.logger.Info(context.Background(), "Command executed successfully", log.Fields{"sessionID": sessionID, "command": cmd})
 	return result, nil
 }
 
@@ -113,6 +121,7 @@ func (am *AdapterManager) Shutdown() {
 		instance.AdapterStop()
 		return true
 	})
+	am.logger.Info(context.Background(), "AdapterManager shut down", nil)
 }
 
 func (am *AdapterManager) commandHandler() {
@@ -121,14 +130,17 @@ func (am *AdapterManager) commandHandler() {
 		case req := <-am.cmdChan:
 			instance, ok := am.instances.Load(req.SessionID)
 			if !ok {
+				am.logger.Error(context.Background(), "No adapter instance found for session", log.Fields{"sessionID": req.SessionID})
 				req.ResultChan <- fmt.Errorf("no adapter instance found for session: %s", req.SessionID)
 				continue
 			}
 			// Use the CommandProcess method of the AdapterInstance
 			result, err := instance.(AdapterInstance).CommandProcess(req.Command)
 			if err != nil {
+				am.logger.Error(context.Background(), "Command processing failed", log.Fields{"sessionID": req.SessionID, "command": req.Command, "error": err})
 				req.ResultChan <- err
 			} else {
+				am.logger.Info(context.Background(), "Command processed successfully", log.Fields{"sessionID": req.SessionID, "command": req.Command})
 				req.ResultChan <- result
 			}
 		case <-am.stopChan:
@@ -145,5 +157,8 @@ func (am *AdapterManager) instanceHandler(sessionID string) {
 		adapterInstance.AdapterStop()
 		am.instances.Delete(sessionID)
 		am.sessionManager.SessionDelete(sessionID)
+		am.logger.Info(context.Background(), "Adapter instance handler stopped", log.Fields{"sessionID": sessionID})
 	}()
+
+	am.logger.Info(context.Background(), "Adapter instance handler started", log.Fields{"sessionID": sessionID})
 }
