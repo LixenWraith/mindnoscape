@@ -151,3 +151,13 @@ Files:
 2. Mindmap permissions and visibility (public/private) are now managed more explicitly.
 
 
+# Installation
+
+Ensure latest version of Go is installed and included in PATH. Run the following bash commands in Linux.
+If you're using another operating system, replace them equivalent commands for your platform (use a LLM to convert).
+
+mkdir mindnoscape
+cd mindnoscape
+curl -O https://raw.githubusercontent.com/yourusername/mindnoscape/main/install_mindnoscape.sh
+chmod +x install_mindnoscape.sh
+./install_mindnoscape.sh
