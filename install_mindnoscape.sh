@@ -4,11 +4,11 @@
 REPO_URL="https://github.com/LixenWraith/mindnoscape.git"
 
 # Set the installation directory to the current directory
-INSTALL_DIR="."
+INSTALL_DIR="${1:-.}"
 
 # Check if the current directory is empty
 if [ "$(ls -A $INSTALL_DIR)" ]; then
-    echo "Error: Current directory is not empty. Please run this script in an empty directory."
+    echo "Error: Installation directory is not empty. Please provide an empty directory or run this script in an empty directory."
     exit 1
 fi
 
@@ -32,11 +32,12 @@ fi
 
 # Build the Mindnoscape application
 echo "Building Mindnoscape..."
-go build -o mindnoscape src/cmd/main.go src/cmd/bootstrap.go
+go build -o mindnoscape src/cmd/main.go
 if [ $? -ne 0 ]; then
     echo "Failed to build the application."
     exit 1
 fi
 
 echo "Mindnoscape has been successfully installed."
-echo "You can run it by executing: ./local-app/mindnoscape"
+echo "You can run it by executing: $INSTALL_DIR/local-app/bin/mindnoscape"
+
