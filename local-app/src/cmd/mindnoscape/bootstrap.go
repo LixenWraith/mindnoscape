@@ -96,7 +96,7 @@ func bootstrap() error {
 
 	logger.Info(context.Background(), "CLI adapter initialized", nil)
 
-	// Create and run CLI
+	// Create a cli instance
 	cliInstance, err := cli.NewCLI(cliAdapter, logger)
 	if err != nil {
 		logger.Error(context.Background(), "Failed to initiate CLI", log.Fields{"error": err})
@@ -113,7 +113,7 @@ func bootstrap() error {
 		cliInstance.Stop()
 	}()
 
-	// Run CLI
+	// Run cli
 	if err := cliInstance.Run(); err != nil {
 		logger.Error(context.Background(), "CLI error", log.Fields{"error": err})
 		return fmt.Errorf("CLI error: %v", err)

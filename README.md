@@ -1,5 +1,7 @@
 # mindnoscape
 
+*This is an unfinished and under-development project. Features, packages, and the whole program may be broken at any time.*
+
 ## 1. Overview
 Mindnoscape is a mind-mapping application that enables users to create, manage, and manipulate mind maps through various operations. The program is designed with a modular architecture, separating concerns into different packages for storage, data management, configuration, user interaction, event handling, and session management. The application initializes various managers, creates a CLI interface, and uses interface adapters to handle user commands and interact with the underlying data structures. The program includes session management, an adapter management system, and a command-line interface for user interaction. It also features a logging system for debugging and auditing capabilities.
 
