@@ -40,8 +40,6 @@ This package implements the command-line interface.
 
 ## 4. Installation
 
-This program requires Go to compile (for version refer to mindnoscape/local-app/go.mod ).
-
 Download the installation script:
 
 	curl -O https://raw.githubusercontent.com/LixenWraith/mindnoscape/main/install_mindnoscape.sh
@@ -50,3 +48,7 @@ Download the installation script:
 Install in an empty directory:
 
 	./install_mindnoscape.sh /path/to/empty/directory
+
+Linux binary files can be found in mindnoscape/local-app/bin directory.
+To compile with Go, run ./script/build.sh in mindnoscape/local-app directory.
+For Go version refer to mindnoscape/local-app/go.mod
