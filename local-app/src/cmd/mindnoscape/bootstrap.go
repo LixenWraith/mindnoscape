@@ -92,13 +92,11 @@ func bootstrap() error {
 	logger.Info(context.Background(), "Adapter manager initialized", nil)
 
 	// Initialize CLI
-	cliInstance, err := cli.NewCLI(adapterManager, logger)
+	cliInstance, err := cli.NewCLI(adapterManager.GetCLIAdapter(), logger)
 	if err != nil {
 		logger.Error(context.Background(), "Failed to initialize CLI", log.Fields{"error": err})
 		return fmt.Errorf("failed to initialize CLI: %v", err)
 	}
-
-	logger.Info(context.Background(), "CLI instance created", nil)
 
 	logger.Info(context.Background(), "CLI instance created", nil)
 

@@ -9,12 +9,13 @@ import (
 
 	"mindnoscape/local-app/src/pkg/adapter"
 	"mindnoscape/local-app/src/pkg/log"
+	"mindnoscape/local-app/src/pkg/model"
 )
 
 // CLI represents the command-line interface
 type CLI struct {
 	adapter *adapter.CLIAdapter
-	conn    *adapter.Connection
+	session *model.Session
 	stopCh  chan struct{}
 	reader  io.Reader
 	writer  io.Writer
@@ -22,31 +23,22 @@ type CLI struct {
 }
 
 // NewCLI creates a new CLI instance
-func NewCLI(adapterManager *adapter.AdapterManager, logger *log.Logger) (*CLI, error) {
-	adapterInstance, err := adapterManager.AdapterGet(adapter.AdapterTypeCLI)
+func NewCLI(adapter *adapter.CLIAdapter, logger *log.Logger) (*CLI, error) {
+	sessionID, err := adapter.SessionAdd()
 	if err != nil {
-		logger.Error(context.Background(), "Failed to get CLI adapter", log.Fields{"error": err})
-		return nil, fmt.Errorf("failed to get CLI adapter: %v", err)
-	}
-
-	cliAdapter, ok := adapterInstance.(*adapter.CLIAdapter)
-	if !ok {
-		logger.Error(context.Background(), "Invalid adapter type", nil)
-		return nil, fmt.Errorf("invalid adapter type: expected CLIAdapter")
+		return nil, fmt.Errorf("failed to create new session: %v", err)
 	}
 
 	cli := &CLI{
-		adapter: cliAdapter,
+		adapter: adapter,
+		session: &model.Session{ID: sessionID},
 		stopCh:  make(chan struct{}),
 		reader:  os.Stdin,
 		writer:  os.Stdout,
 		logger:  logger,
 	}
 
-	// Create a new connection for this CLI instance
-	cli.conn = cliAdapter.ConnectionAdd()
-
-	logger.Info(context.Background(), "CLI instance created", log.Fields{"connectionID": cli.conn.ID})
+	logger.Info(context.Background(), "CLI instance created", log.Fields{"sessionID": sessionID})
 	return cli, nil
 }
 
@@ -56,7 +48,7 @@ func (c *CLI) Run() error {
 	fmt.Println("Type 'system help' for a list of commands or 'system exit' to quit.")
 
 	for {
-		prompt := c.adapter.PromptGet()
+		prompt := c.adapter.PromptGet(c.session.ID)
 		fmt.Print(prompt)
 
 		input, err := c.readLine()
@@ -70,15 +62,15 @@ func (c *CLI) Run() error {
 		}
 
 		// Send raw input to CLIAdapter
-		result, err := c.adapter.ProcessInput(c.conn.ID, input)
+		result, err := c.adapter.ProcessInput(c.session.ID, input)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 		} else if result != nil {
 			fmt.Printf("%v\n", result)
 		}
 
-		// Check if the command was to exit
-		if strings.HasPrefix(strings.ToLower(input), "system exit") || strings.HasPrefix(strings.ToLower(input), "system quit") {
+		// Check if the command was to exit/quit
+		if strings.HasPrefix(strings.ToLower(input), "exit") || strings.HasPrefix(strings.ToLower(input), "quit") {
 			break
 		}
 	}
@@ -115,5 +107,5 @@ func (c *CLI) Stop() {
 	c.logger.Info(context.Background(), "CLI stop signal received", nil)
 
 	// Remove the connection when stopping
-	c.adapter.ConnectionDelete(c.conn.ID)
+	c.adapter.SessionDelete(c.session.ID)
 }

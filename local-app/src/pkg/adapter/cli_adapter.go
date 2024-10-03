@@ -13,79 +13,65 @@ import (
 
 // CLIAdapter provides command-line interface support for managing multiple CLI connections
 type CLIAdapter struct {
-	connections     map[string]*Connection
-	connectionMutex sync.RWMutex
-	adapterManager  *AdapterManager
-	logger          *log.Logger
-}
-
-// Connection represents a single CLI connection
-type Connection struct {
-	ID     string
-	CmdIn  chan model.Command
-	ResOut chan interface{}
+	sessions       map[string]*model.Session
+	sessionMutex   sync.RWMutex
+	adapterManager *AdapterManager
+	logger         *log.Logger
 }
 
 // NewCLIAdapter creates a new instance of CLIAdapter using the provided SessionManager
 func NewCLIAdapter(am *AdapterManager, logger *log.Logger) (*CLIAdapter, error) {
 	logger.Info(context.Background(), "Creating new CLI adapter", nil)
 	return &CLIAdapter{
-		connections:    make(map[string]*Connection),
+		sessions:       make(map[string]*model.Session),
 		adapterManager: am,
 		logger:         logger,
 	}, nil
 }
 
-// AdapterStart AdapterRun Run starts the CLI adapter's main loop
-func (a *CLIAdapter) AdapterStart() error {
-	a.logger.Info(context.Background(), "CLI adapter started", nil)
-	return nil
-}
-
 // AdapterStop Stop signals the CLI adapter to stop
 func (a *CLIAdapter) AdapterStop() error {
-	a.logger.Info(context.Background(), "CLI adapter stopping", nil)
-	a.connectionMutex.Lock()
-	defer a.connectionMutex.Unlock()
-	for _, conn := range a.connections {
-		close(conn.CmdIn)
-		close(conn.ResOut)
+	ctx := context.Background()
+	a.logger.Info(ctx, "CLI adapter stopping", nil)
+
+	a.sessionMutex.Lock()
+	for sessionID := range a.sessions {
+		delete(a.sessions, sessionID)
+		a.logger.Debug(ctx, "Removed session during adapter stop", log.Fields{"sessionID": sessionID})
 	}
-	a.connections = make(map[string]*Connection)
-	a.logger.Info(context.Background(), "CLI adapter stopped", nil)
+	a.sessionMutex.Unlock()
+
+	a.logger.Info(ctx, "CLI adapter stopped", nil)
 	return nil
 }
 
-// GetType returns the type of the adapter
-func (a *CLIAdapter) GetType() string {
-	return AdapterTypeCLI
+// SessionAdd adds a new cli session
+func (a *CLIAdapter) SessionAdd() (string, error) {
+	sessionID, err := a.adapterManager.SessionAdd()
+	if err != nil {
+		return "", err
+	}
+
+	session, exists := a.adapterManager.SessionGet(sessionID)
+	if !exists {
+		a.logger.Error(context.Background(), "Session does not exist", log.Fields{"sessionID": sessionID})
+		return "", fmt.Errorf("session %s does not exist after addition by cli adapter", sessionID)
+	}
+
+	a.sessionMutex.Lock()
+	a.sessions[sessionID] = session
+	a.sessionMutex.Unlock()
+	a.logger.Info(context.Background(), "New CLI session added", log.Fields{"sessionID": sessionID})
+
+	return sessionID, nil
 }
 
-// ConnectionAdd creates a new connection and adds it to the list of connections
-func (a *CLIAdapter) ConnectionAdd() *Connection {
-	id := a.generateUniqueID()
-	conn := &Connection{
-		ID:     id,
-		CmdIn:  make(chan model.Command),
-		ResOut: make(chan interface{}),
-	}
-	a.connectionMutex.Lock()
-	a.connections[id] = conn
-	a.connectionMutex.Unlock()
-	a.logger.Info(context.Background(), "New CLI connection created", log.Fields{"connectionID": id})
-	return conn
-}
-
-// ConnectionDelete removes a CLI connection
-func (a *CLIAdapter) ConnectionDelete(id string) {
-	a.connectionMutex.Lock()
-	defer a.connectionMutex.Unlock()
-	if conn, exists := a.connections[id]; exists {
-		close(conn.CmdIn)
-		close(conn.ResOut)
-		delete(a.connections, id)
-		a.logger.Info(context.Background(), "CLI connection removed", log.Fields{"connectionID": id})
-	}
+// SessionDelete deletes a cli session
+func (a *CLIAdapter) SessionDelete(sessionID string) {
+	a.sessionMutex.Lock()
+	delete(a.sessions, sessionID)
+	a.sessionMutex.Unlock()
+	a.logger.Info(context.Background(), "CLI session removed", log.Fields{"sessionID": sessionID})
 }
 
 // ProcessInput converts the input string into command and runs it
@@ -119,19 +105,26 @@ func (a *CLIAdapter) parseCommand(input string) (model.Command, error) {
 	return cmd, nil
 }
 
-// CommandRun runs a command through adapter manager and returns the result
-func (a *CLIAdapter) CommandRun(connID string, cmd model.Command) (interface{}, error) {
-	a.logger.Info(context.Background(), "Processing command through CLI adapter", log.Fields{"command": cmd})
-	return a.adapterManager.CommandRun(connID, cmd)
-}
-
 // PromptGet gets the current prompt of the session
-func (a *CLIAdapter) PromptGet() string {
-	return "> "
-}
+func (a *CLIAdapter) PromptGet(sessionID string) string {
+	a.sessionMutex.RLock()
+	defer a.sessionMutex.RUnlock()
 
-// generateUniqueID generates a unique ID for a new connection
-// This is a placeholder implementation and should be replaced with a proper unique ID generator
-func (a *CLIAdapter) generateUniqueID() string {
-	return fmt.Sprintf("cli-%d", len(a.connections)+1)
+	session, exists := a.sessions[sessionID]
+	if !exists {
+		a.logger.Warn(context.Background(), "Session not found", log.Fields{"sessionID": sessionID})
+		return "> "
+	}
+
+	if session.User == nil {
+		a.logger.Warn(context.Background(), "No user selected", log.Fields{"sessionID": sessionID})
+		return "> "
+	}
+
+	if session.Mindmap == nil {
+		a.logger.Warn(context.Background(), "No mindmap selected", log.Fields{"sessionID": sessionID})
+		return fmt.Sprintf("%s > ", session.User.Username)
+	}
+
+	return fmt.Sprintf("%s @ %s > ", session.User.Username, session.Mindmap.Name)
 }

@@ -7,22 +7,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/eiannone/keyboard"
 )
 
 const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorWhite  = "\033[37m"
-	colorPink   = "\033[35m"
+	colorReset   = "\033[0m"
+	colorBlack   = "\033[30m"
+	colorRed     = "\033[31m"
+	colorGreen   = "\033[32m"
+	colorYellow  = "\033[33m"
+	colorBlue    = "\033[34m"
+	colorMagenta = "\033[35m"
+	colorCyan    = "\033[36m"
+	colorWhite   = "\033[37m"
 )
 
 var (
@@ -80,6 +84,8 @@ func formatLogEntry(entry LogEntry) string {
 		levelColor = colorBlue
 	case "INFO":
 		levelColor = colorGreen
+	case "WARN":
+		levelColor = colorYellow
 	case "ERROR":
 		levelColor = colorRed
 	default:
@@ -87,14 +93,14 @@ func formatLogEntry(entry LogEntry) string {
 	}
 
 	formattedEntry := fmt.Sprintf("%s%s%s %s%s%s %s",
-		colorYellow, formattedTime, colorReset,
+		colorMagenta, formattedTime, colorReset,
 		levelColor, paddedLevel, colorReset,
 		msg)
 
 	// Add other fields
 	for key, value := range entry {
 		if key != "time" && key != "level" && key != "msg" {
-			formattedEntry += fmt.Sprintf("\n    %s%s:%s %v", colorBlue, key, colorReset, value)
+			formattedEntry += fmt.Sprintf("\n    %s%s:%s %v", colorCyan, key, colorReset, value)
 		}
 	}
 
@@ -204,7 +210,7 @@ func checkAndPrintGap() {
 			gapPrintedMutex.RUnlock()
 
 			if !currentGapPrinted {
-				fmt.Printf("%s◆%s\n", colorPink, colorReset)
+				fmt.Printf("%s◆%s\n", colorMagenta, colorReset)
 				gapPrintedMutex.Lock()
 				gapPrinted = true
 				gapPrintedMutex.Unlock()
@@ -213,26 +219,21 @@ func checkAndPrintGap() {
 	}
 }
 
-func handleKeyPress() {
-	if err := keyboard.Open(); err != nil {
-		panic(err)
-	}
-	defer keyboard.Close()
-
-	fmt.Println("Start typing to filter logs. Press Ctrl-C to exit.")
-	fmt.Print("Current filter: ")
-
+func handleKeyPress(done chan<- struct{}) {
 	for {
 		char, key, err := keyboard.GetKey()
 		if err != nil {
-			panic(err)
+			fmt.Println("Error reading key:", err)
+			done <- struct{}{}
+			return
 		}
 
 		filterMutex.Lock()
 		switch key {
 		case keyboard.KeyCtrlC:
 			fmt.Println("\nExiting...")
-			os.Exit(0)
+			done <- struct{}{}
+			return
 		case keyboard.KeyBackspace, keyboard.KeyBackspace2:
 			if len(filter) > 0 {
 				filter = filter[:len(filter)-1]
@@ -247,6 +248,13 @@ func handleKeyPress() {
 		fmt.Printf("\rCurrent filter: %s", filter)
 		filterMutex.Unlock()
 	}
+}
+
+func cleanup() {
+	keyboard.Close()
+	// Restore terminal settings
+	fmt.Print("\033[?25h")   // Show cursor
+	fmt.Print("\033[?1049l") // Restore screen
 }
 
 func main() {
@@ -284,10 +292,32 @@ func main() {
 
 	lastPrintTime = time.Now()
 
+	if err := keyboard.Open(); err != nil {
+		panic(err)
+	}
+	defer cleanup()
+
+	// Set up signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\nExiting...")
+		cleanup()
+		os.Exit(0)
+	}()
+
 	go monitorLogs()
 	go checkAndPrintGap()
-	go handleKeyPress()
 
-	// Wait indefinitely
-	select {}
+	done := make(chan struct{})
+	go handleKeyPress(done)
+
+	fmt.Println("Start typing to filter logs. Press Ctrl-C to exit.")
+	fmt.Print("Current filter: ")
+
+	// Wait for the done signal or for all other goroutines to complete
+	select {
+	case <-done:
+	}
 }
