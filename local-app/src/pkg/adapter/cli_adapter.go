@@ -4,200 +4,134 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 
 	"mindnoscape/local-app/src/pkg/log"
 	"mindnoscape/local-app/src/pkg/model"
-	"mindnoscape/local-app/src/pkg/session"
 )
 
-// CLIAdapter provides command-line interface support for managing sessions and executing commands
+// CLIAdapter provides command-line interface support for managing multiple CLI connections
 type CLIAdapter struct {
-	sessionID      string
-	sessionManager *session.SessionManager
-	cmdChan        chan model.Command
-	resultChan     chan interface{}
-	stopChan       chan struct{}
-	errChan        chan error
-	logger         *log.Logger
+	connections     map[string]*Connection
+	connectionMutex sync.RWMutex
+	adapterManager  *AdapterManager
+	logger          *log.Logger
+}
+
+// Connection represents a single CLI connection
+type Connection struct {
+	ID     string
+	CmdIn  chan model.Command
+	ResOut chan interface{}
 }
 
 // NewCLIAdapter creates a new instance of CLIAdapter using the provided SessionManager
-func NewCLIAdapter(sm *session.SessionManager, logger *log.Logger) (*CLIAdapter, error) {
-	sessionID, err := sm.SessionAdd()
-	if err != nil {
-		logger.Error(context.Background(), "Failed to create session", log.Fields{"error": err})
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-	logger.Info(context.Background(), "Created new session", log.Fields{"sessionID": sessionID})
-
+func NewCLIAdapter(am *AdapterManager, logger *log.Logger) (*CLIAdapter, error) {
+	logger.Info(context.Background(), "Creating new CLI adapter", nil)
 	return &CLIAdapter{
-		sessionManager: sm,
-		sessionID:      sessionID,
-		cmdChan:        make(chan model.Command),
-		resultChan:     make(chan interface{}),
-		errChan:        make(chan error),
-		stopChan:       make(chan struct{}),
+		connections:    make(map[string]*Connection),
+		adapterManager: am,
 		logger:         logger,
 	}, nil
 }
 
 // AdapterStart AdapterRun Run starts the CLI adapter's main loop
 func (a *CLIAdapter) AdapterStart() error {
-	a.logger.Info(context.Background(), "Starting CLI adapter", nil)
-	go func() {
-		a.logger.Info(context.Background(), "Started command processing goroutine", nil)
-		for {
-			select {
-			case cmd := <-a.cmdChan:
-				a.logger.Command(context.Background(), "Received command", log.Fields{"command": cmd})
-				if a.sessionID == "" {
-					a.logger.Error(context.Background(), "No active session", nil)
-					a.errChan <- fmt.Errorf("no active session")
-					continue
-				}
-				result, err := a.sessionManager.SessionRun(a.sessionID, cmd)
-				if err != nil {
-					a.logger.Error(context.Background(), "Error processing command", log.Fields{"error": err, "command": cmd})
-					a.errChan <- err
-				} else {
-					a.logger.Info(context.Background(), "Command processed successfully", log.Fields{"command": cmd})
-					a.resultChan <- result
-				}
-			case <-a.stopChan:
-				a.logger.Info(context.Background(), "Stopping command processing goroutine", nil)
-				return
-			}
-		}
-	}()
 	a.logger.Info(context.Background(), "CLI adapter started", nil)
 	return nil
 }
 
 // AdapterStop Stop signals the CLI adapter to stop
 func (a *CLIAdapter) AdapterStop() error {
-	if a.stopChan != nil {
-		close(a.stopChan)
+	a.logger.Info(context.Background(), "CLI adapter stopping", nil)
+	a.connectionMutex.Lock()
+	defer a.connectionMutex.Unlock()
+	for _, conn := range a.connections {
+		close(conn.CmdIn)
+		close(conn.ResOut)
 	}
+	a.connections = make(map[string]*Connection)
 	a.logger.Info(context.Background(), "CLI adapter stopped", nil)
 	return nil
 }
 
 // GetType returns the type of the adapter
 func (a *CLIAdapter) GetType() string {
-	return "CLI"
+	return AdapterTypeCLI
 }
 
-// CommandProcess processes a command and returns the result
-func (a *CLIAdapter) CommandProcess(cmd model.Command) (interface{}, error) {
-	a.logger.Info(context.Background(), "Processing command", log.Fields{"command": cmd})
-	// Expand short commands to full commands
-	cmd.Scope, cmd.Operation = a.expandCommand(cmd.Scope, cmd.Operation)
-
-	// Validate the command
-	sessionCmd := session.NewSessionCommand(cmd, a.logger)
-	if err := sessionCmd.Validate(); err != nil {
-		a.logger.Error(context.Background(), "Command validation failed", log.Fields{"error": err, "command": cmd})
-		return nil, fmt.Errorf("command validation failed: %w", err)
+// ConnectionAdd creates a new connection and adds it to the list of connections
+func (a *CLIAdapter) ConnectionAdd() *Connection {
+	id := a.generateUniqueID()
+	conn := &Connection{
+		ID:     id,
+		CmdIn:  make(chan model.Command),
+		ResOut: make(chan interface{}),
 	}
+	a.connectionMutex.Lock()
+	a.connections[id] = conn
+	a.connectionMutex.Unlock()
+	a.logger.Info(context.Background(), "New CLI connection created", log.Fields{"connectionID": id})
+	return conn
+}
 
-	// Send command to the channel
-	a.cmdChan <- cmd
+// ConnectionDelete removes a CLI connection
+func (a *CLIAdapter) ConnectionDelete(id string) {
+	a.connectionMutex.Lock()
+	defer a.connectionMutex.Unlock()
+	if conn, exists := a.connections[id]; exists {
+		close(conn.CmdIn)
+		close(conn.ResOut)
+		delete(a.connections, id)
+		a.logger.Info(context.Background(), "CLI connection removed", log.Fields{"connectionID": id})
+	}
+}
 
-	a.logger.Info(context.Background(), "Command sent to processing channel", log.Fields{"command": cmd})
-
-	// Wait for result or error
-	select {
-	case result := <-a.resultChan:
-		a.logger.Info(context.Background(), "Command processed successfully", log.Fields{"command": cmd, "result": result})
-		return result, nil
-	case err := <-a.errChan:
-		a.logger.Error(context.Background(), "Command processing failed", log.Fields{"error": err, "command": cmd})
+// ProcessInput converts the input string into command and runs it
+func (a *CLIAdapter) ProcessInput(connID string, input string) (interface{}, error) {
+	cmd, err := a.parseCommand(input)
+	if err != nil {
 		return nil, err
 	}
+	return a.adapterManager.CommandRun(connID, cmd)
 }
 
-// expandCommand converts concise (one letter) commands and operations to the long (complete string) format
-func (a *CLIAdapter) expandCommand(scope, operation string) (string, string) {
-	expandedScope := scope
-	expandedOperation := operation
-
-	// Expand scope if it's a single letter
-	if len(scope) == 1 {
-		switch scope {
-		case "s":
-			expandedScope = "system"
-		case "u":
-			expandedScope = "user"
-		case "m":
-			expandedScope = "mindmap"
-		case "n":
-			expandedScope = "node"
-		case "h":
-			expandedScope = "help"
-		}
+func (a *CLIAdapter) parseCommand(input string) (model.Command, error) {
+	args := strings.Fields(input)
+	if len(args) == 0 {
+		a.logger.Info(context.Background(), "Empty command", nil)
+		return model.Command{}, fmt.Errorf("empty command")
 	}
 
-	// Expand operation if it's a single letter
-	if len(operation) == 1 {
-		switch expandedScope {
-		case "user":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "d":
-				expandedOperation = "delete"
-			case "s":
-				expandedOperation = "select"
-			case "l":
-				expandedOperation = "list"
-			}
-		case "mindmap":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "d":
-				expandedOperation = "delete"
-			case "p":
-				expandedOperation = "permission"
-			case "i":
-				expandedOperation = "import"
-			case "e":
-				expandedOperation = "export"
-			case "s":
-				expandedOperation = "select"
-			case "l":
-				expandedOperation = "list"
-			case "v":
-				expandedOperation = "view"
-			}
-		case "node":
-			switch operation {
-			case "a":
-				expandedOperation = "add"
-			case "u":
-				expandedOperation = "update"
-			case "m":
-				expandedOperation = "move"
-			case "d":
-				expandedOperation = "delete"
-			case "f":
-				expandedOperation = "find"
-			case "s":
-				expandedOperation = "sort"
-			}
-		case "system":
-			switch operation {
-			case "e":
-				expandedOperation = "exit"
-			case "q":
-				expandedOperation = "quit"
-			}
-		}
+	cmd := model.Command{
+		Scope:     strings.ToLower(args[0]),
+		Operation: "",
+		Args:      []string{},
 	}
 
-	return expandedScope, expandedOperation
+	if len(args) > 1 {
+		cmd.Operation = strings.ToLower(args[1])
+		cmd.Args = args[2:]
+	}
+
+	a.logger.Info(context.Background(), "Command parsed", log.Fields{"command": cmd})
+	return cmd, nil
+}
+
+// CommandRun runs a command through adapter manager and returns the result
+func (a *CLIAdapter) CommandRun(connID string, cmd model.Command) (interface{}, error) {
+	a.logger.Info(context.Background(), "Processing command through CLI adapter", log.Fields{"command": cmd})
+	return a.adapterManager.CommandRun(connID, cmd)
+}
+
+// PromptGet gets the current prompt of the session
+func (a *CLIAdapter) PromptGet() string {
+	return "> "
+}
+
+// generateUniqueID generates a unique ID for a new connection
+// This is a placeholder implementation and should be replaced with a proper unique ID generator
+func (a *CLIAdapter) generateUniqueID() string {
+	return fmt.Sprintf("cli-%d", len(a.connections)+1)
 }

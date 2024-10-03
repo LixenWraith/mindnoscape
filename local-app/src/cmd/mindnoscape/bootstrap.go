@@ -81,27 +81,24 @@ func bootstrap() error {
 
 	logger.Info(context.Background(), "Session manager initialized", nil)
 
-	// Initialize adapter manager
-	adapterManager := adapter.NewAdapterManager(sessionManager, logger)
+	// Initialize adapter manager (which now includes CLI adapter initialization)
+	adapterManager, err := adapter.NewAdapterManager(sessionManager, logger)
+	if err != nil {
+		logger.Error(context.Background(), "Failed to initialize Adapter manager", log.Fields{"error": err})
+		return fmt.Errorf("failed to initialize Adapter manager: %v", err)
+	}
 	defer adapterManager.Shutdown()
 
 	logger.Info(context.Background(), "Adapter manager initialized", nil)
 
-	// Initialize cli adapter
-	cliAdapter, err := adapter.NewCLIAdapter(sessionManager, logger)
+	// Initialize CLI
+	cliInstance, err := cli.NewCLI(adapterManager, logger)
 	if err != nil {
-		logger.Error(context.Background(), "Failed to initialize CLI adapter", log.Fields{"error": err})
-		return fmt.Errorf("failed to initialize CLI adapter: %v", err)
+		logger.Error(context.Background(), "Failed to initialize CLI", log.Fields{"error": err})
+		return fmt.Errorf("failed to initialize CLI: %v", err)
 	}
 
-	logger.Info(context.Background(), "CLI adapter initialized", nil)
-
-	// Create a cli instance
-	cliInstance, err := cli.NewCLI(cliAdapter, logger)
-	if err != nil {
-		logger.Error(context.Background(), "Failed to initiate CLI", log.Fields{"error": err})
-		return fmt.Errorf("failed to initiate CLI: %v", err)
-	}
+	logger.Info(context.Background(), "CLI instance created", nil)
 
 	logger.Info(context.Background(), "CLI instance created", nil)
 
