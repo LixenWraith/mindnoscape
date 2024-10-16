@@ -47,11 +47,16 @@ func getGeneralHelp() string {
 
 func getScopeHelp(scope string) string {
 	var help strings.Builder
+	var validScope = false
 	help.WriteString(fmt.Sprintf("Commands for %s:\n\n", scope))
 	for _, cmd := range commandHelps {
 		if cmd.Scope == scope {
+			validScope = true
 			help.WriteString(fmt.Sprintf("%-15s %s\n", cmd.Operation, cmd.ShortDesc))
 		}
+	}
+	if validScope == false {
+		return fmt.Sprintf("No help found for %s\n", scope)
 	}
 	return help.String()
 }

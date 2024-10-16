@@ -37,14 +37,18 @@ func handleMindmapAdd(sm *SessionManager, session *model.Session, cmd model.Comm
 		return nil, fmt.Errorf("failed to add mindmap: %w", err)
 	}
 
-	// Fetch the newly created mindmap and set it as the current mindmap
-	mindmaps, err := sm.dataManager.MindmapManager.MindmapGet(session.User, model.MindmapInfo{ID: mindmapID}, model.MindmapFilter{ID: true})
-	if err != nil || len(mindmaps) == 0 {
-		sm.logger.Error(ctx, "Failed to retrieve newly created mindmap", log.Fields{"error": err, "mindmapID": mindmapID})
-		return nil, fmt.Errorf("failed to retrieve newly created mindmap: %w", err)
-	}
-	session.Mindmap = mindmaps[0]
-	sm.logger.Debug(ctx, "Set new mindmap as current", log.Fields{"mindmapID": mindmapID})
+	/*
+		// Auto-selection of a new mindmap seems to happen before the root node is created, removing auto-selection of the newly created mindmap
+		// Fetch the newly created mindmap and set it as the current mindmap
+		mindmaps, err := sm.dataManager.MindmapManager.MindmapGet(session.User, model.MindmapInfo{ID: mindmapID}, model.MindmapFilter{ID: true})
+		if err != nil || len(mindmaps) == 0 {
+			sm.logger.Error(ctx, "Failed to retrieve newly created mindmap", log.Fields{"error": err, "mindmapID": mindmapID})
+			return nil, fmt.Errorf("failed to retrieve newly created mindmap: %w", err)
+		}
+		session.Mindmap = mindmaps[0]
+		sm.logger.Debug(ctx, "Set new mindmap as current", log.Fields{"mindmapID": mindmapID})
+
+	*/
 
 	sm.logger.Info(ctx, "Mindmap added successfully", log.Fields{"mindmapID": mindmapID})
 	return mindmapID, nil
@@ -317,6 +321,11 @@ func handleMindmapView(sm *SessionManager, session *model.Session, cmd model.Com
 	if session.Mindmap == nil {
 		sm.logger.Error(ctx, "No mindmap selected", nil)
 		return nil, fmt.Errorf("no mindmap selected")
+	}
+
+	if session.Mindmap.Root == nil {
+		sm.logger.Error(ctx, "Mindmap has no root node", log.Fields{"mindmapID": session.Mindmap.ID})
+		return nil, fmt.Errorf("mindmap has no root node")
 	}
 
 	showID := false
